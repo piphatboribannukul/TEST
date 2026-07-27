@@ -5210,7 +5210,7 @@ async function fetchAndUpdate() {
   }
 
   // V27 Hybrid K — back-calculate K จาก live FRC ก่อน rebuild cache
-  renderHybridKPanel();
+  // renderHybridKPanel() — dangling call จาก v35 hybrid cleaning, ลบใน v37 (function ไม่มีอยู่จริง)
 
   // redraw ทุก layer
   // v36.1: ครอบ fallback path ด้วย (ห่อกัน error ตัดตอน redraw)
@@ -7266,7 +7266,7 @@ function showZepMsg(text, color, bg, border) {
 // Pre-cache VC data + bounding box reject → ลด O(n×m) เหลือ O(1) per pixel
 // ══════════════════════════════════════════════════════════════════════
 let _zoneCache = null;
-let _zoneCacheKey = '';
+var _zoneCacheKey = '';
 
 function _rebuildZoneCache() {
   const key = JSON.stringify(Object.keys(window.CUSTOM_ZONES || {})) + '_' + (typeof VC_STATIONS !== 'undefined' ? VC_STATIONS.map(v=>v.id+v.valvePct).join() : '');
