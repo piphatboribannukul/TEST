@@ -4,7 +4,20 @@
 const APP_VERSION = '37.0';
 function appBadge(suffix){ return '⬡ V' + APP_VERSION + (suffix ? '+' + suffix : ''); }
 
-// ═══════════ [block 1/11 — original lines 3252-9863] ═══════════
+// ── สารบัญ (ค้นหา "[N/11]" เพื่อกระโดดไป section) ──
+//   [1/11] CORE ENGINE — map, contour, Dijkstra, K chain (3-priority), tempK Arrhenius, RTU, live poll, report
+//   [2/11] ZONES — zone store, DEFAULT_ZONES, zone editor, district boundaries
+//   [3/11] DISCLAIMER TICKER — โหมด FRC/EC
+//   [4/11] MISC INIT
+//   [5/11] 3D VIEW — three.js contour surface
+//   [6/11] SEARCH — สถานี / lat,lon / geocode
+//   [7/11] FIREBASE HELPERS — _ref/_get shortcuts
+//   [8/11] WHAT-IF — สถานการณ์จำลอง K/ระยะ
+//   [9/11] VC SIM — valve control simulation
+//   [10/11] RAW WATER EC — สีและ interpolation
+//   [11/11] RAW WATER STATIONS + ALERTS + BOOT — แม่กลอง/เจ้าพระยา, แจ้งเตือน, init สุดท้าย
+
+// ═══════════ [1/11] CORE ENGINE — map, contour, Dijkstra, K chain (3-priority), tempK Arrhenius, RTU, live poll, report ═══════════
 // ── API Configuration ──────────────────────────────────────────────────────
 const API_URL      = 'https://twqonline.mwa.co.th/TWQMSServicepublic/api/mwaonmobile/getStations';
 const POLL_INTERVAL = 15 * 60 * 1000; // 15 นาที (มิลลิวินาที)
@@ -202,7 +215,7 @@ const DEG_TO_KM = 111.0;
 const EUCLID_PIPE_FACTOR = 1.30;
 
 // ══════════════════════════════════════════════════════════════════════
-// v36: Temperature-corrected K — Arrhenius layer (toggle, default OFF)
+// Temperature-corrected K — Arrhenius layer (toggle, default OFF)
 // ──────────────────────────────────────────────────────────────────────
 // K(T) = K × exp(−(E/R) × (1/(T+273.15) − 1/(T_REF+273.15)))
 //   E/R  = 8971 K   (Kongbuchakiat et al. 2025, Results in Engineering 28:108043, BKWTP)
@@ -216,12 +229,12 @@ const EUCLID_PIPE_FACTOR = 1.30;
 // ══════════════════════════════════════════════════════════════════════
 let TEMP_CORR_ON = false;
 try { TEMP_CORR_ON = localStorage.getItem('frc_temp_corr') === '1'; } catch(e){}
-// v36.2: T_REF = อุณหภูมิน้ำตอน calibrate K จริง — ไม่ใช่ 21.4 ของขวดแล็บ
+// T_REF = อุณหภูมิน้ำตอน calibrate K จริง — ไม่ใช่ 21.4 ของขวดแล็บ
 // เหตุผล: CONTOUR_K_OVERRIDE (0.065–0.10/hr ≈ 1.6–2.4/day) calibrate สนาม 5–12 เม.ย.69
 // กลางหน้าร้อน น้ำ ~32°C → ความร้อนถูกอบใน K แล้ว (1.92/day ≈ เส้น FO 30°C ของ กนว.)
 // ตั้ง ref=32 ทำให้ factor≈1 วันนี้ และกลายเป็นตัวปรับฤดูกาล: หนาว→K ลด, ร้อนจัด→K เพิ่ม
 let TEMP_REF_C = 32.0;
-// v36.3: Firebase = source of truth (ค่ากลางทั้งระบบ ทุกเครื่องตรงกัน)
+// Firebase = source of truth (ค่ากลางทั้งระบบ ทุกเครื่องตรงกัน)
 // localStorage = cache สำหรับตอน offline/ก่อน FB พร้อมเท่านั้น — บทเรียน K override Edge/Chrome
 try { const _tr = parseFloat(localStorage.getItem('frc_temp_ref')); if (isFinite(_tr) && _tr >= 20 && _tr <= 36) TEMP_REF_C = _tr; } catch(e){}
 
@@ -660,12 +673,12 @@ function renderStationKList() {
 }
 
 function epanetDecay(dKm, sensor, lat, lon, distMult) {
-  // v34-rtulive: single pressure layer with automatic source selection.
+  // single pressure layer with automatic source selection.
   //   1) s.rtuPressure — pre-injected per-sensor nearest RTU pressure (fastest, avoids O(N) scan per pixel)
   //   2) _pressureGrid fallback — passed in as distMult by callers that have (j,i),
   //      used when RTU live is unavailable (e.g. GitHub Pages / CORS / mixed-content)
   //   Only ONE source is ever applied → no double-counting.
-  // v35.11: DMA velocity ทั้งหมด (spatial + branch-level) ถูกเอาออก
+  // หมายเหตุ: DMA velocity ถูกถอดออกถาวร (relay เปราะ + ไม่มีข้อมูล diameter รายท่อ)
   //   เนื่องจาก relay pattern ไม่เสถียร (browser tab ต้องเปิดค้าง) และ
   //   ไม่มี pipe diameter รายจุด → velocity คำนวณเพี้ยนกว่า sensor จริง
   let L_m = dKm * 1000;
@@ -692,14 +705,12 @@ function epanetDecay(dKm, sensor, lat, lon, distMult) {
       return Math.exp(-(CONTOUR_K_OVERRIDE[sid] * window._tempKFactor / 3600) * t);
     }
 
-    // อัปเดตทุกรอบ live data เพื่อให้ K ตรงกับสภาพจริงปัจจุบัน
-
-    // Priority 3: STATION_K_OVERRIDE — K fit จากข้อมูล 3 เดือน (hardcode)
+    // Priority 2: STATION_K_OVERRIDE — K fit จากข้อมูล 3 เดือน (hardcode)
     if (STATION_K_OVERRIDE[sid] != null) {
       return Math.exp(-(STATION_K_OVERRIDE[sid] * window._tempKFactor / 3600) * t);
     }
   }
-  // Fallback: K_total จาก EPANET sidebar (สำหรับสถานีที่ไม่มี K override)
+  // Priority 3 (fallback): K_total จาก EPANET sidebar (สำหรับสถานีที่ไม่มี K override)
   return Math.exp(-K_total * window._tempKFactor * t);
 }
 
@@ -1590,7 +1601,7 @@ function idw(lat, lon) {
   return _idwCache[j0 * rows + i0];
 }
 
-// ── v35.4: Full-chain FRC diagnostic ─────────────────────────────────────
+// ── Full-chain FRC diagnostic (_frcDiag) ─────────────────────────────────────
 // Usage in console: _frcDiag(13.910483, 100.745731)
 // Walks through the SAME 4-tier priority chain buildIdwCache() uses per pixel,
 // reporting which tier decided the value + sensor/distance/K/velocity/decay detail.
@@ -2048,7 +2059,6 @@ map.on('zoomend', () => { _drawOnCanvas(); });
 map.on('moveend', () => { if(_needsRedraw()) redrawContour(50); });
 
 // alias
-const contourGrid = { redraw: _drawOnCanvas };
 
 let _redrawTimer = null;
 function redrawContour(delay=100) {
@@ -2196,7 +2206,7 @@ const rtuGroup = L.layerGroup(); // default: NOT added to map
       return online.reduce((s,r) => s + r.lP, 0) / online.length;
     })();
     console.log('RTU live pressure: ' + window._rtuLive.length + ' stations, P_nominal=' + window._rtuPNominal.toFixed(1) + ' mwc');
-    // v34-rtulive: inject RTU pressure into SENSORS after B64 init
+    // inject RTU pressure into SENSORS after B64 init
     // ใช้ setTimeout เพื่อรอให้ SENSORS โหลดเสร็จก่อน (fetchAndUpdate อาจยังไม่ run)
     setTimeout(() => {
       if (typeof injectRtuPressureToSensors === 'function' && typeof SENSORS !== 'undefined' && SENSORS.length > 0) {
@@ -2403,7 +2413,7 @@ const rtuGroup = L.layerGroup(); // default: NOT added to map
     
     console.log('[RTU-Refresh] ✅ Updated: ' + online.length + ' online, P_nominal=' + window._rtuPNominal.toFixed(1) + ' mwc');
     
-    // v34-rtulive: re-inject RTU pressure into SENSORS after live update
+    // re-inject RTU pressure into SENSORS after live update
     if (typeof injectRtuPressureToSensors === 'function') injectRtuPressureToSensors();
     
     // Redraw FRC contour with new pressure data
@@ -4396,7 +4406,7 @@ function mapApiData(raw) {
                   : (s.value && s.value.ec != null) ? s.value.ec
                   : (s.conductivity || s.ec || null);
       const ec = ecRaw != null ? parseFloat(ecRaw) : null;
-      // v36: อุณหภูมิน้ำในเส้นท่อจาก TWQMS (value.tmp_6) — ไม่ทุกสถานีมี
+      // อุณหภูมิน้ำในเส้นท่อจาก TWQMS (value.tmp_6) — ไม่ทุกสถานีมี
       const tmpRaw = (s.value && s.value.tmp_6 != null) ? parseFloat(s.value.tmp_6) : NaN;
       const tempC = (isFinite(tmpRaw) && tmpRaw > 0) ? tmpRaw : null;
       return {
@@ -5123,7 +5133,7 @@ function updateHistBadge(hist) {
   renderKTuner();
 }
 
-// ── v34-rtulive: inject RTU pressure into each SENSOR (nearest RTU by lat/lon) ──
+// ── inject RTU pressure into each SENSOR (nearest RTU by lat/lon) ──
 // เรียกหลัง SENSORS.push เสร็จ และหลัง refreshRtu() อัปเดต _rtuLive
 // ผล: sensor.rtuPressure = lP ของ RTU ที่ใกล้ที่สุด
 //     epanetDecay() อ่านค่านี้ได้เลย ไม่ต้อง scan _rtuLive ทุก pixel (O(1) แทน O(N))
@@ -5140,7 +5150,7 @@ function injectRtuPressureToSensors() {
     s.rtuPressure = nearP > 0 ? nearP : 0;
     if (nearP > 0) injected++;
   }
-  console.log('[v34-rtulive] injectRtuPressureToSensors: ' + injected + '/' + SENSORS.length + ' sensors got RTU pressure');
+  console.log('[RTU] injectRtuPressureToSensors: ' + injected + '/' + SENSORS.length + ' sensors got RTU pressure');
   // อัปเดต v2-badge แสดงสถานะ RTU
   const _v2b = document.getElementById('v2-badge');
   if (_v2b) {
@@ -5175,7 +5185,7 @@ async function fetchAndUpdate() {
     SENSORS.length = 0;
     merged.forEach(s => SENSORS.push(s));
 
-    // v36.1: อัปเดต temp factor ทันทีหลังได้ SENSORS (ย้ายขึ้นมากันโค้ดอื่น throw ตัดตอน)
+    // อัปเดต temp factor ทันทีหลังได้ SENSORS (ย้ายขึ้นมากันโค้ดอื่น throw ตัดตอน)
     try { updateTempFactor(SENSORS); } catch(e) { console.warn('[TempK] update fail:', e); }
 
     // บันทึกประวัติ (ไม่ fit k อัตโนมัติ — ใช้ K Default จาก Firebase)
@@ -5210,16 +5220,16 @@ async function fetchAndUpdate() {
   }
 
   // V27 Hybrid K — back-calculate K จาก live FRC ก่อน rebuild cache
-  // renderHybridKPanel() — dangling call จาก v35 hybrid cleaning, ลบใน v37 (function ไม่มีอยู่จริง)
+  // (dangling renderHybridKPanel call removed in v37)
 
   // redraw ทุก layer
-  // v36.1: ครอบ fallback path ด้วย (ห่อกัน error ตัดตอน redraw)
+  // ครอบ fallback path ด้วย (ห่อกัน error ตัดตอน redraw)
   try { updateTempFactor(SENSORS); } catch(e) { console.warn('[TempK] update fail:', e); }
 
   _histCache = null; // invalidate history cache after new data
   buildMarkers();
   buildIdwCache();   // rebuild cache หลังได้ข้อมูล sensor ใหม่
-  // v34-rtulive: re-inject after buildIdwCache so contour uses fresh RTU pressure
+  // re-inject after buildIdwCache so contour uses fresh RTU pressure
   injectRtuPressureToSensors();
   redrawContour();
   updateStats();
@@ -5878,7 +5888,6 @@ setInterval(()=>{ if (!_pauseTick) tick(); },1000); tick();
 // ══════════════════════════════════════════════════════════════════
 // FORECAST ANIMATION ENGINE
 // ══════════════════════════════════════════════════════════════════
-const FC_HOURS = 12, FC_STEPS = 13, FC_FPS = 0.6;
 let _fcFrames = null, _fcFrame = 0, _fcPlaying = false, _fcRAF = null, _fcLastTime = 0;
 
 // ── helper: หา stationCode ของต้นทางจาก rootLabel ─────────────────────────
@@ -6389,7 +6398,7 @@ async function importTWQ(input) {
     console.error('[importTWQ]', e);
   }
 }
-// ═══════════ [block 2/11 — original lines 9907-13177] ═══════════
+// ═══════════ [2/11] ZONES — zone store, DEFAULT_ZONES, zone editor, district boundaries ═══════════
 // ═══════════════════════════════════════════════════════════════════
 // V.2.0 — ZONE INFLUENCE EDITOR
 // กำหนดขอบเขตพื้นที่อิทธิพลของสถานีสูบจ่ายน้ำบนแผนที่
@@ -6403,7 +6412,6 @@ async function importTWQ(input) {
 
 window.CUSTOM_ZONES = {}; // stationId → array of [lat,lon] polygon coords
 let _zepSelectedStation = null;   // currently selected station object
-let _drawingLayer        = null;  // Leaflet layer being drawn
 let _drawMode            = null;  // 'polygon' | 'circle' | null
 let _zoneLayerGroup      = null;  // Leaflet layer group for zone overlays
 let _drawCoords          = [];    // accumulating click coords during polygon draw
@@ -7651,7 +7659,6 @@ function rpTab(mode) {
   }
 }
 // ── Trend: เปรียบเทียบค่าจริง vs คาดการณ์ ย้อนหลัง 24 ชม. ──
-var _trendInited = false;
 function rpTrendRefresh() {
   var list = document.getElementById('rp-trend-list');
   var param = document.getElementById('rp-trend-param').value;
@@ -9600,7 +9607,7 @@ const _zepInitTimer = setInterval(() => {
   });
   window.addEventListener('resize', function() { if (_on) doResize(); });
 })();
-// ═══════════ [block 3/11 — original lines 13201-13223] ═══════════
+// ═══════════ [3/11] DISCLAIMER TICKER — โหมด FRC/EC ═══════════
 function submitFeedback(){
   var name=document.getElementById('fb-name').value.trim();
   var msg=document.getElementById('fb-msg').value.trim();
@@ -9624,7 +9631,7 @@ function submitFeedback(){
   document.getElementById('fb-success').style.display='';
   setTimeout(function(){document.getElementById('fb-overlay').classList.remove('open');},1800);
 }
-// ═══════════ [block 4/11 — original lines 13227-13247] ═══════════
+// ═══════════ [4/11] MISC INIT ═══════════
 // Force disclaimer visible on iOS/iPad
 (function(){
   var d=document.getElementById('disclaimer-bar');
@@ -9646,7 +9653,7 @@ function submitFeedback(){
     console.log('[Disclaimer] forced visible for iOS/Safari');
   }
 })();
-// ═══════════ [block 5/11 — original lines 13353-14332] ═══════════
+// ═══════════ [5/11] 3D VIEW — three.js contour surface ═══════════
 /* ═══════════════════════════════════════════════════════════
    V8.5 — 3D TERRAIN CONTOUR (Three.js)
    ═══════════════════════════════════════════════════════════ */
@@ -10627,7 +10634,7 @@ function submitFeedback(){
     animate();
   }
 })();
-// ═══════════ [block 6/11 — original lines 14337-14955] ═══════════
+// ═══════════ [6/11] SEARCH — สถานี / lat,lon / geocode ═══════════
 (function(){
   'use strict';
 
@@ -11247,7 +11254,7 @@ function submitFeedback(){
   });
 
 })();
-// ═══════════ [block 7/11 — original lines 14960-15040] ═══════════
+// ═══════════ [7/11] FIREBASE HELPERS — _ref/_get shortcuts ═══════════
 (function(){
   function _fb() { return window._fb; }
   function _ref(path) { return window._fbRef(window._fb, path); }
@@ -11329,7 +11336,7 @@ function submitFeedback(){
   // ── Login ── (rev11.0: ย้ายไปใช้ Firebase Auth แล้ว — ดู rpFbLogin)
   // hardcoded credentials ถูกลบออกเพื่อความปลอดภัย
 })();
-// ═══════════ [block 8/11 — original lines 15046-15257] ═══════════
+// ═══════════ [8/11] WHAT-IF — สถานการณ์จำลอง K/ระยะ ═══════════
 (function(){
   let _wifStation = null;
   let _wifDelta = 0;
@@ -11542,7 +11549,7 @@ function submitFeedback(){
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _do);
   else _do();
 })();
-// ═══════════ [block 9/11 — original lines 15262-15342] ═══════════
+// ═══════════ [9/11] VC SIM — valve control simulation ═══════════
 (function(){
   function _srcName(id) {
     const map = {'SP01':'TR1 (สูบส่งบางเขน 1)','SP02':'TR2 (สูบส่งบางเขน 2)','SP03':'TR3 (สูบส่งบางเขน 3)',
@@ -11624,7 +11631,7 @@ function submitFeedback(){
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _doRender);
   else _doRender();
 })();
-// ═══════════ [block 10/11 — original lines 15455-16128] ═══════════
+// ═══════════ [10/11] RAW WATER EC — สีและ interpolation ═══════════
 (function() {
   'use strict';
 
@@ -12299,7 +12306,7 @@ function submitFeedback(){
   };
 
 })();
-// ═══════════ [block 11/11 — original lines 16137-18172] ═══════════
+// ═══════════ [11/11] RAW WATER STATIONS + ALERTS + BOOT — แม่กลอง/เจ้าพระยา, แจ้งเตือน, init สุดท้าย ═══════════
 (function() {
   'use strict';
 
