@@ -5537,7 +5537,8 @@ async function initFromFirebase() {
     // เริ่ม realtime listener
     fbListenRealtime();
 
-    if (badge && totalPts > 0) {
+    if (badge && totalPts > 0 && apiStatus !== 'live') {
+      // แสดงเฉพาะตอน API ยังไม่ live — ไม่ทับสถานะ "● Live" ของ poll ที่สำเร็จไปแล้ว
       badge.textContent = `✅ โหลด ${totalPts} จุดย้อนหลัง`;
       badge.style.color = '#006020';
     }
