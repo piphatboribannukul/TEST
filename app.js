@@ -3942,7 +3942,7 @@ function buildMarkers() {
       ? `<div style="position:relative;width:${sz}px;height:${sz}px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));cursor:pointer;">
            <svg viewBox="0 0 24 24" width="${sz}" height="${sz}">${
              s.type === 'plant'
-               ? '<path d="M3 21V10l5 3v-3l5 3V9h3V4h5v17H3z" fill="#16306b" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"/>'
+               ? '<rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="#16306b" stroke="#fff" stroke-width="1.8"/><path d="M12 6.3c2.3 2.8 3.6 4.6 3.6 6.2a3.6 3.6 0 1 1-7.2 0c0-1.6 1.3-3.4 3.6-6.2z" fill="#fff"/>'
                : '<rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="#2563a8" stroke="#fff" stroke-width="1.8"/><path d="M12 6.3c2.3 2.8 3.6 4.6 3.6 6.2a3.6 3.6 0 1 1-7.2 0c0-1.6 1.3-3.4 3.6-6.2z" fill="#fff"/>'
            }</svg>
            <div style="position:absolute;right:-3px;bottom:-3px;width:8px;height:8px;border-radius:50%;background:${c};border:1.6px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3);"></div>
@@ -14665,5 +14665,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && _dashSelKey) { _dashClearSelect(); buildDashboard(); }
 });
 
-// boot: หน้าแรก = แดชบอร์ด
-setTimeout(() => { try { buildDashboard(); } catch (e) { console.warn('[Dash] boot:', e.message); } }, 1800);
+// boot: หน้าแรก = แดชบอร์ด — ซูมเต็มกรอบตั้งแต่เปิด (ระดับเดียวกับกดแท็บ)
+setTimeout(() => { try {
+  buildDashboard();
+  if (document.body.classList.contains('dash-mode')) _dashFitHome();
+} catch (e) { console.warn('[Dash] boot:', e.message); } }, 1800);
