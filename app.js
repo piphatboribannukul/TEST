@@ -4434,6 +4434,7 @@ function setParam(mode) {
   // reset unified timeline เมื่อเปลี่ยน mode (FRC/EC ใช้ frame ต่างกัน)
   _unifiedLoaded = false;
   _unifiedFrames = [];
+  try { if (typeof buildDashboard === 'function') { _dashClearSelect(); buildDashboard(); } } catch(e) {}
 }
 
 
@@ -14309,9 +14310,12 @@ document.querySelectorAll('.v30-scale-section input').forEach(inp => {
 let DASH_GROUP = 'zone';   // 'zone' = อิทธิพลสูบจ่าย (SP/SW) | 'branch' = สาขา สจ.
 let _dashChart = null;
 let _dashLastTab = 'dash';
+let _dashRows = [];
+let _dashHilite = null;
+let _dashSelKey = null;
+let _dashAreaByName = null;
 
 function setTab(tab) {
-  // Forecast/Report = action tabs: เปิด panel เดิม แล้วคงอยู่ view ปัจจุบัน
   if (tab === 'forecast') {
     if (typeof openForecastBar === 'function') openForecastBar();
     _flashTab('mtab-forecast'); return;
@@ -14325,11 +14329,13 @@ function setTab(tab) {
   document.querySelectorAll('.mtab').forEach(b => b.classList.remove('active'));
   const btn = document.getElementById('mtab-' + tab);
   if (btn) btn.classList.add('active');
+  setTimeout(() => { try { map.invalidateSize(); } catch (e) {} }, 160);
   if (tab === 'dash') {
-    try { map.fitBounds([[13.45, 100.25], [14.10, 100.97]]); } catch (e) {}
+    setTimeout(() => { try {
+      if (_dashHilite) map.fitBounds(_dashHilite.getBounds(), { padding: [24, 24] });
+      else map.fitBounds([[13.45, 100.25], [14.10, 100.97]]);
+    } catch (e) {} }, 220);
     buildDashboard();
-  } else {
-    try { map.invalidateSize(); } catch (e) {}
   }
 }
 function _flashTab(id) {
@@ -14340,12 +14346,23 @@ function _flashTab(id) {
 }
 function setDashGroup(g) {
   DASH_GROUP = g;
+  _dashClearSelect();
   document.getElementById('dash-grp-zone').classList.toggle('on', g === 'zone');
   document.getElementById('dash-grp-branch').classList.toggle('on', g === 'branch');
   buildDashboard();
 }
 
-// ── กำหนดสถานี monitor → โซนอิทธิพลสูบจ่าย (polygon ก่อน, ใกล้สุด fallback) ──
+// ── param helpers: แดชบอร์ดตามโหมด FRC / EC ──
+function _dIsEc() { return typeof PARAM_MODE !== 'undefined' && PARAM_MODE === 'ec'; }
+function _dVal(s) { return _dIsEc() ? (s.ec != null ? s.ec : null) : (s.frc != null ? s.frc : null); }
+function _dCol(v) {
+  if (!_dIsEc()) return frcColor(v);
+  return v >= 400 ? '#ef4444' : v >= 300 ? '#f97316' : v >= 250 ? '#eab308' : v >= 200 ? '#22c55e' : v >= 150 ? '#14b8a6' : '#3b82f6';
+}
+function _dUnit() { return _dIsEc() ? 'µS/cm' : 'mg/L'; }
+function _dFmt(v) { return _dIsEc() ? Math.round(v) : v.toFixed(2); }
+
+// ── สังกัด: โซนอิทธิพล (polygon → ใกล้สุด) / สาขา (area → fallback lookup ตามชื่อ) ──
 function _dashZoneOf(m) {
   if (window.CUSTOM_ZONES) {
     for (const [sid, zone] of Object.entries(window.CUSTOM_ZONES)) {
@@ -14361,6 +14378,19 @@ function _dashZoneOf(m) {
   }
   return best || '?';
 }
+function _dashBranchOf(m) {
+  if (m.area && String(m.area).trim()) return String(m.area).trim();
+  if (!_dashAreaByName) {
+    _dashAreaByName = {};
+    try { for (const f of SENSORS_FALLBACK) if (f.area) _dashAreaByName[String(f.name).trim()] = String(f.area).trim(); } catch (e) {}
+  }
+  return _dashAreaByName[String(m.name || '').trim()] || 'อื่น ๆ';
+}
+function _dashKeyOf(m) { return DASH_GROUP === 'zone' ? _dashZoneOf(m) : _dashBranchOf(m); }
+function _dashMonitors() {
+  return SENSORS.filter(s => s.type === 'monitor' && _dVal(s) != null && isFinite(_dVal(s)));
+}
+function _dashMembers(key) { return _dashMonitors().filter(m => _dashKeyOf(m) === key); }
 function _dashZoneName(sid) {
   const s = SENSORS.find(x => String(x.id) === String(sid));
   if (!s) return sid;
@@ -14368,26 +14398,24 @@ function _dashZoneName(sid) {
 }
 
 function _dashStats() {
-  const monitors = SENSORS.filter(s => s.type === 'monitor' && s.frc != null && isFinite(s.frc));
+  const monitors = _dashMonitors();
   const n = monitors.length;
-  const pass = monitors.filter(m => m.frc >= 0.2).length;
-  const vals = monitors.map(m => m.frc).sort((a, b) => a - b);
+  const vals = monitors.map(_dVal).sort((a, b) => a - b);
   const avg = n ? vals.reduce((a, b) => a + b, 0) / n : 0;
   const med = n ? vals[Math.floor(n / 2)] : 0;
-  const watch = monitors.filter(m => m.frc < 0.3).sort((a, b) => a.frc - b.frc);
-  // group
+  const isEc = _dIsEc();
+  const pass = monitors.filter(m => isEc ? _dVal(m) < 300 : _dVal(m) >= 0.2).length;
+  const watch = monitors.filter(m => isEc ? _dVal(m) >= 300 : _dVal(m) < 0.3)
+    .sort((a, b) => isEc ? _dVal(b) - _dVal(a) : _dVal(a) - _dVal(b));
   const groups = {};
-  for (const m of monitors) {
-    const key = DASH_GROUP === 'zone' ? _dashZoneOf(m) : (m.area || 'อื่น ๆ');
-    (groups[key] = groups[key] || []).push(m);
-  }
+  for (const m of monitors) { const k = _dashKeyOf(m); (groups[k] = groups[k] || []).push(m); }
   const gRows = Object.entries(groups).map(([key, arr]) => ({
     key, label: DASH_GROUP === 'zone' ? _dashZoneName(key) : String(key).replace(/^สจ\./, ''),
-    avg: arr.reduce((a, b) => a + b.frc, 0) / arr.length,
-    min: Math.min(...arr.map(x => x.frc)), n: arr.length,
+    avg: arr.reduce((a, b) => a + _dVal(b), 0) / arr.length,
+    min: Math.min(...arr.map(_dVal)), max: Math.max(...arr.map(_dVal)), n: arr.length,
     lat: arr.reduce((a, b) => a + b.lat, 0) / arr.length,
     lon: arr.reduce((a, b) => a + b.lon, 0) / arr.length
-  })).sort((a, b) => a.avg - b.avg);
+  })).sort((a, b) => _dIsEc() ? b.avg - a.avg : a.avg - b.avg);
   return { n, pass, avg, med, watch, gRows };
 }
 
@@ -14395,32 +14423,38 @@ function buildDashboard() {
   if (!document.body.classList.contains('dash-mode')) return;
   if (!SENSORS || !SENSORS.length) return;
   const st = _dashStats();
+  _dashRows = st.gRows;
+  const isEc = _dIsEc();
+  const U = _dUnit();
 
-  // ── donut % ผ่านเกณฑ์ ──
+  // ── donut ──
   const pct = st.n ? Math.round(st.pass / st.n * 100) : 0;
   const R = 44, C = 2 * Math.PI * R;
   const col = pct >= 95 ? '#16a34a' : pct >= 85 ? '#84cc16' : pct >= 70 ? '#f59e0b' : '#dc2626';
+  document.querySelector('#dash-summary h4').innerHTML = isEc ? '⚡ ภาพรวมความนำไฟฟ้า (EC)' : '💧 ภาพรวมคุณภาพน้ำ (FRC)';
   document.getElementById('dash-donut').innerHTML =
     `<circle cx="55" cy="55" r="${R}" fill="none" stroke="#eef2f7" stroke-width="11"/>` +
     `<circle cx="55" cy="55" r="${R}" fill="none" stroke="${col}" stroke-width="11" stroke-linecap="round"` +
     ` stroke-dasharray="${(pct / 100 * C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 55 55)"/>` +
     `<text x="55" y="51" text-anchor="middle" font-size="19" font-weight="800" fill="#1e3a5f" font-family="JetBrains Mono,monospace">${pct}%</text>` +
-    `<text x="55" y="68" text-anchor="middle" font-size="9" fill="#94a3b8">ผ่านเกณฑ์</text>`;
-  document.getElementById('dash-donut-stats').innerHTML =
-    `ผ่าน ≥0.2 mg/L: <b>${st.pass}/${st.n}</b> สถานี<br>` +
-    `เฉลี่ยทั้งระบบ: <b>${st.avg.toFixed(2)}</b> mg/L<br>` +
-    `มัธยฐาน: <b>${st.med.toFixed(2)}</b> mg/L`;
+    `<text x="55" y="68" text-anchor="middle" font-size="9" fill="#94a3b8">${isEc ? 'เกณฑ์ดี' : 'ผ่านเกณฑ์'}</text>`;
+  document.getElementById('dash-donut-stats').innerHTML = isEc
+    ? `EC &lt; 300 ${U}: <b>${st.pass}/${st.n}</b> สถานี<br>เฉลี่ยทั้งระบบ: <b>${Math.round(st.avg)}</b> ${U}<br>มัธยฐาน: <b>${Math.round(st.med)}</b> ${U}`
+    : `ผ่าน ≥0.2 ${U}: <b>${st.pass}/${st.n}</b> สถานี<br>เฉลี่ยทั้งระบบ: <b>${st.avg.toFixed(2)}</b> ${U}<br>มัธยฐาน: <b>${st.med.toFixed(2)}</b> ${U}`;
 
-  // ── watchlist < 0.3 ──
+  // ── watchlist ──
+  document.querySelector('#dash-watch h4').innerHTML =
+    `⚠️ สถานีเฝ้าระวัง <span class="dash-meta" id="dash-watch-meta"></span>`;
+  document.getElementById('dash-watch-meta').textContent =
+    (isEc ? 'EC ≥ 300 ' + U : 'FRC < 0.3 ' + U) + ' · ' + st.watch.length + ' สถานี';
   const wl = document.getElementById('dash-watch-list');
-  document.getElementById('dash-watch-meta').textContent = 'FRC < 0.3 mg/L · ' + st.watch.length + ' สถานี';
   wl.innerHTML = st.watch.length ? st.watch.map(m =>
     `<div class="dw-item" onclick="dashGoto(${m.lat},${m.lon})">` +
     `<span class="dw-name">${(m.name || m.id)}</span>` +
-    `<span class="dw-val" style="color:${frcColor(m.frc)}">${m.frc.toFixed(2)}</span></div>`).join('')
-    : '<div class="dw-empty">✅ ทุกสถานี ≥ 0.3 mg/L</div>';
+    `<span class="dw-val" style="color:${_dCol(_dVal(m))}">${_dFmt(_dVal(m))}</span></div>`).join('')
+    : `<div class="dw-empty">✅ ทุกสถานีอยู่ในเกณฑ์ดี</div>`;
 
-  // ── model / system card ──
+  // ── system card ──
   const rtuN = SENSORS.filter(s => s.rtuPressure > 0).length;
   const tf = window._tempKFactor || 1;
   document.getElementById('dash-model').innerHTML =
@@ -14433,39 +14467,100 @@ function buildDashboard() {
 
   // ── zone cards ──
   document.getElementById('dash-zones').innerHTML = st.gRows.map(g => {
-    const c = frcColor(g.avg);
-    return `<div class="dz-card" onclick="dashGoto(${g.lat},${g.lon})">` +
+    const c = _dCol(g.avg);
+    const frac = Math.min(isEc ? g.avg / 500 : g.avg / 1.5, 1);
+    return `<div class="dz-card${String(g.key) === String(_dashSelKey) ? ' sel' : ''}" onclick="dashSelectZone('${String(g.key).replace(/'/g, "\\'")}')">` +
       `<svg width="34" height="34" viewBox="0 0 34 34"><circle cx="17" cy="17" r="13" fill="none" stroke="#eef2f7" stroke-width="5"/>` +
-      `<circle cx="17" cy="17" r="13" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(Math.min(g.avg / 1.5, 1) * 81.7).toFixed(1)} 81.7" transform="rotate(-90 17 17)"/></svg>` +
-      `<div class="dz-info"><div class="dz-name">${g.label}</div><div class="dz-sub">${g.n} สถานี · ต่ำสุด ${g.min.toFixed(2)}</div></div>` +
-      `<span class="dz-val" style="color:${c}">${g.avg.toFixed(2)}</span></div>`;
+      `<circle cx="17" cy="17" r="13" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(frac * 81.7).toFixed(1)} 81.7" transform="rotate(-90 17 17)"/></svg>` +
+      `<div class="dz-info"><div class="dz-name">${g.label}</div><div class="dz-sub">${g.n} สถานี · ${isEc ? 'สูงสุด ' + Math.round(g.max) : 'ต่ำสุด ' + g.min.toFixed(2)}</div></div>` +
+      `<span class="dz-val" style="color:${c}">${_dFmt(g.avg)}</span></div>`;
   }).join('');
 
   // ── bar chart ──
+  document.getElementById('dash-chart-title').textContent =
+    `📊 ${isEc ? 'EC' : 'FRC'} เฉลี่ยรายพื้นที่ (${U})`;
   document.getElementById('dash-updated').textContent =
     'ปรับปรุงล่าสุด: ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
   try {
-    const ctx = document.getElementById('dash-chart').getContext('2d');
     const labels = st.gRows.map(g => g.label);
-    const data = st.gRows.map(g => +g.avg.toFixed(2));
-    const colors = st.gRows.map(g => frcColor(g.avg));
-    if (_dashChart) { _dashChart.data.labels = labels; _dashChart.data.datasets[0].data = data;
-      _dashChart.data.datasets[0].backgroundColor = colors; _dashChart.update('none'); }
-    else {
+    const data = st.gRows.map(g => +(isEc ? Math.round(g.avg) : g.avg.toFixed(2)));
+    const colors = st.gRows.map(g => _dCol(g.avg));
+    if (_dashChart) {
+      _dashChart.data.labels = labels; _dashChart.data.datasets[0].data = data;
+      _dashChart.data.datasets[0].backgroundColor = colors; _dashChart.update('none');
+    } else {
+      const ctx = document.getElementById('dash-chart').getContext('2d');
       _dashChart = new Chart(ctx, { type: 'bar',
         data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 5, maxBarThickness: 26 }] },
         options: { responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' FRC เฉลี่ย ' + c.parsed.y + ' mg/L' } } },
+          onClick: (e, els) => { if (els && els[0] != null && _dashRows[els[0].index]) dashSelectZone(_dashRows[els[0].index].key); },
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' เฉลี่ย ' + c.parsed.y + ' ' + _dUnit() + ' (คลิกเพื่อดูรายละเอียด)' } } },
           scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { size: 9 } } },
                     x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 45, minRotation: 30 } } } } });
     }
   } catch (e) { console.warn('[Dash] chart:', e.message); }
 }
 
-function dashGoto(lat, lon) {
-  setTab('map');
-  setTimeout(() => { try { map.flyTo([lat, lon], 13.5); } catch (e) {} }, 120);
+// ── เลือกโซน: กรอบพื้นที่อิทธิพล + การ์ดรายละเอียด (ต้นทาง + สถานีรับน้ำ) ──
+function dashSelectZone(key) {
+  const row = _dashRows.find(r => String(r.key) === String(key));
+  if (!row) return;
+  _dashSelKey = key;
+  if (_dashHilite) { try { map.removeLayer(_dashHilite); } catch (e) {} _dashHilite = null; }
+  let bounds = null;
+  if (DASH_GROUP === 'zone' && window.CUSTOM_ZONES && CUSTOM_ZONES[key] && CUSTOM_ZONES[key].coords && CUSTOM_ZONES[key].coords.length > 2) {
+    _dashHilite = L.polygon(CUSTOM_ZONES[key].coords,
+      { color: '#2563a8', weight: 3.5, fillColor: '#2563a8', fillOpacity: 0.07, dashArray: '9 6' }).addTo(map);
+    bounds = _dashHilite.getBounds();
+  } else {
+    const members = _dashMembers(key);
+    if (members.length) {
+      bounds = L.latLngBounds(members.map(m => [m.lat, m.lon])).pad(0.35);
+      _dashHilite = L.rectangle(bounds, { color: '#2563a8', weight: 3, fillOpacity: 0.05, dashArray: '9 6' }).addTo(map);
+    }
+  }
+  if (bounds) { try { map.fitBounds(bounds, { padding: [28, 28] }); } catch (e) {} }
+  _dashRenderDetail(key, row);
+  buildDashboard(); // refresh .sel highlight บน card
+}
+function _dashClearSelect() {
+  _dashSelKey = null;
+  if (_dashHilite) { try { map.removeLayer(_dashHilite); } catch (e) {} _dashHilite = null; }
+  const d = document.getElementById('dash-detail');
+  if (d) d.classList.remove('show');
+  try { map.fitBounds([[13.45, 100.25], [14.10, 100.97]]); } catch (e) {}
+}
+function _dashRenderDetail(key, row) {
+  const d = document.getElementById('dash-detail');
+  if (!d) return;
+  const isEc = _dIsEc();
+  const members = _dashMembers(key).sort((a, b) => isEc ? _dVal(b) - _dVal(a) : _dVal(a) - _dVal(b));
+  let srcHtml = '';
+  if (DASH_GROUP === 'zone') {
+    const src = SENSORS.find(x => String(x.id) === String(key));
+    if (src) {
+      const sv = _dVal(src);
+      srcHtml = `<div class="dd-src"><div><div class="dd-src-name">🏭 ${src.name || key}</div>` +
+        `<div class="dash-meta">สถานีสูบจ่ายต้นทาง</div></div>` +
+        `<span class="dd-src-val" style="color:${sv != null ? _dCol(sv) : '#94a3b8'}">${sv != null ? _dFmt(sv) : '–'}</span></div>`;
+    }
+  }
+  d.innerHTML =
+    `<button class="dd-close" onclick="_dashClearSelect()">✕</button>` +
+    `<h4>📍 ${row.label}</h4>` + srcHtml +
+    `<div class="dd-note">▧ กรอบเส้นประสีน้ำเงินบนแผนที่ = ${DASH_GROUP === 'zone' ? 'พื้นที่อิทธิพลสูบจ่าย' : 'ขอบเขตสถานีในสาขา'}</div>` +
+    `<div class="dash-meta" style="margin-bottom:4px;">สถานีรับน้ำ ${members.length} แห่ง · เฉลี่ย ${_dFmt(row.avg)} ${_dUnit()}</div>` +
+    members.map(m =>
+      `<div class="dw-item" onclick="dashGoto(${m.lat},${m.lon})">` +
+      `<span class="dw-name">${m.name || m.id}</span>` +
+      `<span class="dw-val" style="color:${_dCol(_dVal(m))}">${_dFmt(_dVal(m))}</span></div>`).join('');
+  d.classList.add('show');
 }
 
-// boot: หน้าแรก = แดชบอร์ด (body มี class dash-mode จาก HTML แล้ว)
+function dashGoto(lat, lon) {
+  setTab('map');
+  setTimeout(() => { try { map.flyTo([lat, lon], 13.5); } catch (e) {} }, 200);
+}
+
+// boot: หน้าแรก = แดชบอร์ด
 setTimeout(() => { try { buildDashboard(); } catch (e) { console.warn('[Dash] boot:', e.message); } }, 1800);

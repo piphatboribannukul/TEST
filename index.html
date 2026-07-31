@@ -60,7 +60,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#3a0a20">
-<title>MWA FRCContour : Real-Time Chlorine Contour v37.1</title>
+<title>แผนที่ความเข้มข้นคลอรีนอิสระคงเหลือแบบเรียลไทม์ (Real-time FRC Contour Map) v37.1</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.min.js"></script>
@@ -1971,9 +1971,9 @@ if (window.innerWidth <= 640) document.documentElement.classList.add('mobile-ini
     var isMobile=window.innerWidth<=960;
     if(h1){
       if(isLand&&isMobile){
-        h1.innerHTML='🌸 M sandbox : Real-Time Contour';
+        h1.innerHTML='💧 แผนที่ FRC เรียลไทม์';
       } else {
-        h1.innerHTML='🌸 M sandbox : Real-Time Chlorine Contour';
+        h1.innerHTML='💧 แผนที่ความเข้มข้นคลอรีนอิสระคงเหลือแบบเรียลไทม์';
       }
     }
     // ย้าย rev ไว้ใต้ clock ในแนวนอน
@@ -2262,29 +2262,46 @@ if (window.innerWidth <= 640) document.documentElement.classList.add('mobile-ini
   </script>
 <style id="dash-css">
 /* ═══════════ DASHBOARD v37.1 — GISTDA-style ═══════════ */
-/* ── Header restyle: ขาวสะอาด ── */
-#header{background:#fff !important;box-shadow:0 1px 8px rgba(15,40,80,.12) !important;border-bottom:1px solid #e2e8f0 !important;}
-#header h1{color:#1e3a5f !important;text-shadow:none !important;}
+/* ── Header: ขาวสะอาด + จัดเรียงเมนู ── */
+#header{background:#fff !important;box-shadow:0 1px 8px rgba(15,40,80,.12) !important;border-bottom:1px solid #e2e8f0 !important;display:flex;align-items:center;gap:10px;}
+#header h1{color:#1e3a5f !important;text-shadow:none !important;font-size:13px !important;flex-shrink:1;min-width:0;max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #header #clock{color:#64748b !important;}
-#header h1{font-size:14px !important;flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-/* ── ปุ่ม Forecast/Report เดิม → ย้ายเข้าแท็บ ── */
+#param-switcher{margin-left:auto;}
+/* ── ปุ่ม Forecast/Report ลอยเดิม → ย้ายเข้าแท็บ ── */
 #forecast-toggle-float,#report-btn{display:none !important;}
-/* ── Tab bar ── */
-#main-tabs{display:flex;gap:6px;margin:0 10px;align-items:center;}
-.mtab{border:1.5px solid transparent;background:transparent;color:#475569;font-family:inherit;font-size:13px;font-weight:600;
-  padding:6px 14px;border-radius:20px;cursor:pointer;transition:all .18s;white-space:nowrap;}
-.mtab:hover{background:#f1f5f9;color:#1e3a5f;}
-.mtab.active{background:#2563a8;color:#fff;box-shadow:0 2px 8px rgba(37,99,168,.35);}
-/* ── Dashboard panels (แสดงเฉพาะ body.dash-mode) ── */
+/* ── data-status pill: เลื่อนลงพ้น header / ซ่อนในแดชบอร์ด ── */
+#data-status-bar{top:54px !important;}
+body.dash-mode #data-status-bar{display:none !important;}
+/* ── Tab bar: สไตล์เดียวกันทุกปุ่ม ── */
+#main-tabs{display:flex;gap:7px;margin:0 6px;align-items:center;flex-shrink:0;}
+.mtab{border:1.5px solid #e2e8f0;background:#f1f5f9;color:#475569;font-family:inherit;font-size:12.5px;font-weight:600;
+  padding:6px 15px;border-radius:20px;cursor:pointer;transition:all .18s;white-space:nowrap;}
+.mtab:hover{background:#e2e8f0;color:#1e3a5f;}
+.mtab.active{background:#2563a8;border-color:#2563a8;color:#fff;box-shadow:0 2px 8px rgba(37,99,168,.35);}
+/* ── Dashboard mode: พื้นหลัง + แผนที่ใส่กรอบแบบ GISTDA ── */
+body.dash-mode{background:#eef2f7;}
+body.dash-mode #map{position:fixed !important;left:324px;right:314px;top:64px;bottom:196px;
+  width:auto !important;height:auto !important;border-radius:16px;overflow:hidden;
+  box-shadow:0 4px 18px rgba(15,40,80,.13);border:1px solid #e2e8f0;}
+body.dash-mode #disclaimer-ticker{display:none !important;}
+/* ── Panels ── */
 .dash-panel{display:none;position:fixed;z-index:850;}
 body.dash-mode .dash-panel{display:flex;flex-direction:column;gap:10px;}
-#dash-left{top:64px;left:12px;width:300px;max-height:calc(100vh - 210px);}
-#dash-right{top:64px;right:12px;width:290px;max-height:calc(100vh - 210px);}
-#dash-bottom{left:324px;right:314px;bottom:34px;height:150px;min-width:300px;}
+#dash-left{top:64px;left:12px;width:300px;bottom:12px;}
+#dash-right{top:64px;right:12px;width:290px;bottom:12px;}
+#dash-bottom{left:324px;right:314px;bottom:12px;height:172px;min-width:300px;}
 .dash-card{background:#fff;border-radius:16px;box-shadow:0 4px 18px rgba(15,40,80,.13);padding:12px 14px;font-family:inherit;color:#1e3a5f;}
 .dash-card h4{margin:0 0 8px;font-size:13px;color:#1e3a5f;display:flex;align-items:center;gap:6px;}
 #dash-watch{flex:1;overflow-y:auto;min-height:0;}
 #dash-zones{flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:8px;padding-right:2px;}
+/* ── detail card (เมื่อเลือกโซน) ── */
+#dash-detail{display:none;max-height:46vh;overflow-y:auto;border:2px solid #2563a8;}
+#dash-detail.show{display:block;}
+#dash-detail .dd-close{float:right;border:none;background:#f1f5f9;color:#64748b;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1;}
+.dd-src{display:flex;justify-content:space-between;align-items:center;background:#f0f7ff;border-radius:10px;padding:8px 10px;margin:6px 0;}
+.dd-src-name{font-size:11.5px;font-weight:700;color:#1e3a5f;}
+.dd-src-val{font-size:19px;font-weight:800;font-family:'JetBrains Mono',monospace;}
+.dd-note{font-size:10px;color:#2563a8;margin:4px 0 8px;}
 /* ── watchlist ── */
 .dw-item{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:9px;cursor:pointer;transition:background .15s;border-bottom:1px solid #f1f5f9;}
 .dw-item:hover{background:#f1f5f9;}
@@ -2292,8 +2309,9 @@ body.dash-mode .dash-panel{display:flex;flex-direction:column;gap:10px;}
 .dw-val{font-size:13px;font-weight:800;font-family:'JetBrains Mono',monospace;}
 .dw-empty{font-size:12px;color:#16a34a;padding:10px;text-align:center;}
 /* ── zone cards ── */
-.dz-card{background:#fff;border-radius:14px;box-shadow:0 2px 10px rgba(15,40,80,.10);padding:9px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:transform .12s, box-shadow .12s;}
+.dz-card{background:#fff;border-radius:14px;box-shadow:0 2px 10px rgba(15,40,80,.10);padding:9px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:transform .12s, box-shadow .12s;border:2px solid transparent;}
 .dz-card:hover{transform:translateY(-1px);box-shadow:0 5px 16px rgba(15,40,80,.16);}
+.dz-card.sel{border-color:#2563a8;}
 .dz-info{flex:1;min-width:0;}
 .dz-name{font-size:11.5px;font-weight:700;color:#1e3a5f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .dz-sub{font-size:10px;color:#94a3b8;}
@@ -2302,7 +2320,7 @@ body.dash-mode .dash-panel{display:flex;flex-direction:column;gap:10px;}
 #dash-donut-wrap{display:flex;align-items:center;gap:12px;}
 #dash-donut-stats{font-size:11px;color:#475569;line-height:1.9;}
 #dash-donut-stats b{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#1e3a5f;}
-/* ── group toggle + meta ── */
+/* ── toggle / meta / chart ── */
 .dash-toggle{display:inline-flex;border:1.5px solid #cbd5e1;border-radius:16px;overflow:hidden;}
 .dash-toggle button{border:none;background:#fff;color:#64748b;font-family:inherit;font-size:10.5px;font-weight:600;padding:3px 10px;cursor:pointer;}
 .dash-toggle button.on{background:#2563a8;color:#fff;}
@@ -2310,14 +2328,16 @@ body.dash-mode .dash-panel{display:flex;flex-direction:column;gap:10px;}
 #dash-chart-card{height:100%;display:flex;flex-direction:column;}
 #dash-chart-head{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;}
 #dash-chart-box{flex:1;min-height:0;position:relative;}
-/* ── ซ่อน chrome ของโหมดแผนที่เมื่ออยู่แดชบอร์ด ── */
+/* ── ซ่อน chrome โหมดแผนที่เมื่ออยู่แดชบอร์ด ── */
 body.dash-mode #ham-btn,body.dash-mode #map-search-wrap,body.dash-mode #v30-tab-btn,
 body.dash-mode #ai-insight-btn,body.dash-mode #flow-btn,body.dash-mode #legend-panel,
 body.dash-mode #sidebar,body.dash-mode #about-btn{display:none !important;}
 @media (max-width:900px){
-  #dash-left{width:250px;}#dash-right{width:240px;}
-  #dash-bottom{left:270px;right:254px;}
-  #main-tabs{gap:2px;margin:0 4px;}.mtab{padding:5px 8px;font-size:11px;}
+  #dash-left{width:248px;}#dash-right{width:238px;}
+  body.dash-mode #map{left:270px;right:260px;}
+  #dash-bottom{left:270px;right:260px;}
+  #main-tabs{gap:3px;margin:0 3px;}.mtab{padding:5px 9px;font-size:11px;}
+  #header h1{max-width:180px;}
 }
 </style>
 
@@ -2325,12 +2345,12 @@ body.dash-mode #sidebar,body.dash-mode #about-btn{display:none !important;}
 <body class="dash-mode">
 <div id="header">
   <div class="live-dot"></div>
-  <h1 id="header-title">🌸 M sandbox : Real-Time Chlorine Contour</h1>
+  <h1 id="header-title" title="แผนที่ความเข้มข้นคลอรีนอิสระคงเหลือแบบเรียลไทม์ (Real-time FRC Contour Map)">💧 แผนที่ความเข้มข้นคลอรีนอิสระคงเหลือแบบเรียลไทม์</h1>
   <nav id="main-tabs">
     <button class="mtab active" id="mtab-dash" onclick="setTab('dash')">📊 แดชบอร์ด</button>
     <button class="mtab" id="mtab-map" onclick="setTab('map')">🗺️ แผนที่</button>
-    <button class="mtab" id="mtab-forecast" onclick="setTab('forecast')">📈 Forecast</button>
-    <button class="mtab" id="mtab-report" onclick="setTab('report')">📋 Report</button>
+    <button class="mtab" id="mtab-forecast" onclick="setTab('forecast')">📈 คาดการณ์</button>
+    <button class="mtab" id="mtab-report" onclick="setTab('report')">📋 รายงาน</button>
   </nav>
   <div id="param-switcher">
     <button class="param-btn active" id="btn-frc" onclick="setParam('frc')">🌸 FRC</button>
@@ -3609,6 +3629,7 @@ I=ค่าจริง, AA=ค่า contour, tt=travel time<br>
 
 <!-- ═══ DASHBOARD OVERLAYS (v37.1) ═══ -->
 <div id="dash-left" class="dash-panel">
+  <div class="dash-card" id="dash-detail"></div>
   <div class="dash-card" id="dash-summary">
     <h4>💧 ภาพรวมคุณภาพน้ำ (FRC)</h4>
     <div id="dash-donut-wrap">
@@ -3628,7 +3649,7 @@ I=ค่าจริง, AA=ค่า contour, tt=travel time<br>
 <div id="dash-bottom" class="dash-panel">
   <div class="dash-card" id="dash-chart-card">
     <div id="dash-chart-head">
-      <h4 style="margin:0;">📊 FRC เฉลี่ยรายพื้นที่</h4>
+      <h4 style="margin:0;" id="dash-chart-title">📊 FRC เฉลี่ยรายพื้นที่</h4>
       <span class="dash-toggle">
         <button id="dash-grp-zone" class="on" onclick="setDashGroup('zone')">โซนสูบจ่าย</button>
         <button id="dash-grp-branch" onclick="setDashGroup('branch')">สาขา</button>
