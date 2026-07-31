@@ -3628,7 +3628,7 @@ function buildMarkers() {
     // marker color: FRC ใช้ statusColor (solid #cc0055/#e05080/#b07000 เหมือนต้นฉบับ)
     //               EC  ใช้ ecColor (solid blue/orange)
     const c = PARAM_MODE === 'frc' ? statusColor(pv) : ecStatus(pv) === `เกินมาตรฐาน ⚠ (≥${EC_CONFIG.hi})` ? '#b32800' : pv >= EC_CONFIG.lo ? '#1565c0' : '#1a7ab0';
-    const sz=s.type==='plant'?12:s.type==='pump'?10:7;
+    const sz=s.type==='plant'?22:s.type==='pump'?18:7;   // v37.1: icon ต้นทางใหญ่ชัดเป็นลำดับชั้น
     const br=s.type==='monitor'?'50%':'3px';
     const tt = TRAVEL_TIME[s.name] || TRAVEL_TIME[s.name.replace(/\s+/g, ' ').trim()];
 
@@ -3937,6 +3937,15 @@ function buildMarkers() {
            <div style="width:${sz}px;height:${sz}px;border-radius:4px;background:${_vcClosed?'#999':c};border:2.5px solid rgba(255,255,255,.95);box-shadow:0 2px 8px ${_vcClosed?'#99999988':c+'88'};cursor:pointer;${_vcClosed?'opacity:.6;':''}"></div>
            <div style="margin-top:2px;font-size:8px;font-weight:700;color:${_vcClosed?'#999':'#6c3483'};white-space:nowrap;text-shadow:0 0 3px #fff,0 0 3px #fff;">${s.name.replace('VC ','')}</div>
            ${_vcClosed?'<div style="font-size:7px;color:#c00;font-weight:700;">ปิด</div>':''}
+         </div>`
+      : (s.type === 'plant' || s.type === 'pump')
+      ? `<div style="position:relative;width:${sz}px;height:${sz}px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));cursor:pointer;">
+           <svg viewBox="0 0 24 24" width="${sz}" height="${sz}">${
+             s.type === 'plant'
+               ? '<path d="M3 21V10l5 3v-3l5 3V9h3V4h5v17H3z" fill="#16306b" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"/>'
+               : '<rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="#2563a8" stroke="#fff" stroke-width="1.8"/><path d="M12 6.3c2.3 2.8 3.6 4.6 3.6 6.2a3.6 3.6 0 1 1-7.2 0c0-1.6 1.3-3.4 3.6-6.2z" fill="#fff"/>'
+           }</svg>
+           <div style="position:absolute;right:-3px;bottom:-3px;width:8px;height:8px;border-radius:50%;background:${c};border:1.6px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3);"></div>
          </div>`
       : `<div style="width:${sz}px;height:${sz}px;border-radius:${br};background:${c};border:2.5px solid rgba(255,255,255,.95);box-shadow:0 2px 8px ${c}88;cursor:pointer;"></div>`;
 
@@ -14324,6 +14333,12 @@ let _dashRows = [];
 let _dashHilite = null;
 let _dashSelKey = null;
 
+function _dashFitHome() {
+  try {
+    map.fitBounds([[13.45, 100.25], [14.10, 100.97]]);
+    setTimeout(() => { try { map.setZoom(map.getZoom() + 0.5); } catch (e) {} }, 60);   // เต็มกรอบ
+  } catch (e) {}
+}
 function setTab(tab) {
   if (tab === 'forecast') {
     if (document.body.classList.contains('dash-mode')) setTab('map');   // view สะอาดก่อน
@@ -14343,7 +14358,7 @@ function setTab(tab) {
   if (tab === 'dash') {
     setTimeout(() => { try {
       if (_dashHilite) map.fitBounds(_dashHilite.getBounds(), { padding: [24, 24] });
-      else map.fitBounds([[13.45, 100.25], [14.10, 100.97]]);
+      else _dashFitHome();
     } catch (e) {} }, 220);
     buildDashboard();
   }
@@ -14532,6 +14547,20 @@ function buildDashboard() {
       `<span class="dz-val" style="color:${c}">${_dFmt(v)}</span></div>`;
   }).join('');
 
+  // ── legend ในกรอบแผนที่ ──
+  try {
+    const lg = document.getElementById('dash-map-legend');
+    if (lg) {
+      const bands = isEc
+        ? [[100,'<150'],[175,'200'],[225,'250'],[275,'300'],[350,'400'],[450,'≥400']]
+        : [[0.1,'<0.2'],[0.25,'0.3'],[0.4,'0.5'],[0.65,'0.8'],[1.0,'1.2'],[1.35,'≥1.2']];
+      lg.innerHTML =
+        `<div class="dl-title">มาตราส่วนสี ${isEc ? 'EC (µS/cm)' : 'FRC (mg/L)'}</div>` +
+        `<div class="dl-bar">${bands.map(b => `<span style="background:${_dCol(b[0])}"></span>`).join('')}</div>` +
+        `<div class="dl-labels">${bands.map(b => `<span>${b[1]}</span>`).join('')}</div>`;
+    }
+  } catch (e) {}
+
   // ── bar chart ──
   document.getElementById('dash-chart-title').textContent =
     `📊 ${isEc ? 'EC' : 'FRC'} รายพื้นที่อิทธิพล — ${DASH_GROUP === 'src' ? 'ค่าต้นทางสถานีสูบจ่าย' : 'เฉลี่ยทั้งพื้นที่ (ต้นทาง+ปลายทาง)'} (${U})`;
@@ -14597,7 +14626,7 @@ function _dashClearSelect() {
   if (_dashHilite) { try { map.removeLayer(_dashHilite); } catch (e) {} _dashHilite = null; }
   const d = document.getElementById('dash-detail');
   if (d) d.classList.remove('show');
-  try { map.fitBounds([[13.45, 100.25], [14.10, 100.97]]); } catch (e) {}
+  if (document.body.classList.contains('dash-mode')) _dashFitHome();
 }
 function _dashRenderDetail(key, row) {
   const d = document.getElementById('dash-detail');
