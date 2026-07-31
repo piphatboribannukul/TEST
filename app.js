@@ -14605,7 +14605,7 @@ function _dashRenderDetail(key, row) {
   const isEc = _dIsEc();
   const members = _dashMembers(key).sort((a, b) => isEc ? _dVal(b) - _dVal(a) : _dVal(a) - _dVal(b));
   let srcHtml = '';
-  if (DASH_GROUP === 'zone') {
+  {
     const src = SENSORS.find(x => String(x.id) === String(key));
     if (src) {
       const sv = _dVal(src);
@@ -14617,7 +14617,7 @@ function _dashRenderDetail(key, row) {
   d.innerHTML =
     `<button class="dd-close" onclick="_dashClearSelect()">✕</button>` +
     `<h4>📍 ${row.label}</h4>` + srcHtml +
-    `<div class="dd-note">▧ กรอบเส้นประสีน้ำเงินบนแผนที่ = ${DASH_GROUP === 'zone' ? 'พื้นที่อิทธิพลสูบจ่าย' : 'ขอบเขตสถานีในสาขา'}</div>` +
+    `<div class="dd-note">▧ กรอบเส้นสีน้ำเงินบนแผนที่ = พื้นที่อิทธิพลสูบจ่าย (contour แสดงเฉพาะในกรอบ)</div>` +
     `<div class="dash-meta" style="margin-bottom:4px;">${members.length ? 'สถานีรับน้ำ ' + members.length + ' แห่ง · เฉลี่ยพื้นที่ (รวมต้นทาง) ' + _dFmt(row.avg) + ' ' + _dUnit() : 'ยังไม่มีจุดตรวจปลายทางในพื้นที่นี้ — ใช้ค่าสถานีต้นทางเป็นตัวแทน'}</div>` +
     members.map(m =>
       `<div class="dw-item" onclick="dashGoto(${m.lat},${m.lon})">` +
