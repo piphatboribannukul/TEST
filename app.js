@@ -14381,22 +14381,40 @@ function _dCol(v) {
 function _dUnit() { return _dIsEc() ? 'µS/cm' : 'mg/L'; }
 function _dFmt(v) { return _dIsEc() ? Math.round(v) : v.toFixed(2); }
 
+// ── Zone influence polygon ต่อสถานีสูบจ่าย: CUSTOM_ZONES → STA_POLYS ที่ครอบสถานี ──
+let _dashPolyMap = null;
+function _dashZonePoly(src) {
+  const sid = String(src.id);
+  const cz = window.CUSTOM_ZONES || {};
+  if (cz[sid] && cz[sid].coords && cz[sid].coords.length >= 3) return cz[sid].coords;
+  for (const k in cz) {
+    const z = cz[k];
+    if (k.startsWith('VC')) continue;
+    if (z.coords && z.coords.length >= 3 && _pip(src.lat, src.lon, z.coords)) return z.coords;
+  }
+  for (let i = 0; i < STA_POLYS.length; i++) {
+    if (_pip(src.lat, src.lon, STA_POLYS[i].coords)) return STA_POLYS[i].coords;
+  }
+  return null;
+}
+function _dashRebuildPolyMap() {
+  _dashPolyMap = {};
+  for (const src of _dashSources()) _dashPolyMap[String(src.id)] = _dashZonePoly(src);
+}
+
 // ── สังกัด: โซนอิทธิพล (polygon → ใกล้สุด) / สาขา (area → fallback lookup ตามชื่อ) ──
 function _dashZoneOf(m) {
-  const _distToSid = sid => {
+  if (!_dashPolyMap) _dashRebuildPolyMap();
+  const hits = [];
+  for (const [sid, poly] of Object.entries(_dashPolyMap)) {
+    if (poly && _pip(m.lat, m.lon, poly)) hits.push(sid);
+  }
+  const _d2 = sid => {
     const s = SENSORS.find(x => String(x.id) === String(sid));
     return s ? (s.lat - m.lat) ** 2 + (s.lon - m.lon) ** 2 : Infinity;
   };
-  if (window.CUSTOM_ZONES) {
-    const hits = [];
-    for (const [sid, zone] of Object.entries(window.CUSTOM_ZONES)) {
-      if (sid.startsWith('VC') || !zone.coords || zone.coords.length < 3) continue;
-      if (_pip(m.lat, m.lon, zone.coords)) hits.push(sid);
-    }
-    if (hits.length === 1) return hits[0];
-    if (hits.length > 1) return hits.sort((a, b) => _distToSid(a) - _distToSid(b))[0];  // ซ้อนกัน → ต้นทางใกล้สุด
-  }
-  const sources = (typeof _ensureFrcSources === 'function') ? _ensureFrcSources() : [];
+  if (hits.length) return hits.sort((a, b) => _d2(a) - _d2(b))[0];  // polygon ซ้อน → ต้นทางใกล้สุด
+  const sources = _dashSources();
   let best = null, bd = Infinity;
   for (const s of sources) {
     const d = (s.lat - m.lat) ** 2 + (s.lon - m.lon) ** 2;
@@ -14423,6 +14441,7 @@ function _dashZoneName(sid) {
 }
 
 function _dashStats() {
+  _dashRebuildPolyMap();
   const all = _dashAllStations();
   const n = all.length;
   const vals = all.map(_dVal).sort((a, b) => a - b);
@@ -14547,12 +14566,13 @@ function dashSelectZone(key) {
   if (_dashHilite) { try { map.removeLayer(_dashHilite); } catch (e) {} _dashHilite = null; }
   let bounds = null;
   window._dashClipCoords = null;
-  if (DASH_GROUP === 'zone' && window.CUSTOM_ZONES && CUSTOM_ZONES[key] && CUSTOM_ZONES[key].coords && CUSTOM_ZONES[key].coords.length > 2) {
-    const coords = CUSTOM_ZONES[key].coords;
-    _dashHilite = L.polygon(coords,
+  if (!_dashPolyMap) _dashRebuildPolyMap();
+  const zonePoly = _dashPolyMap[String(key)];
+  if (zonePoly && zonePoly.length > 2) {
+    _dashHilite = L.polygon(zonePoly,
       { color: '#1d4ed8', weight: 4, fillOpacity: 0, opacity: 1 }).addTo(map);   // เส้นทึบ ไม่ทับสี contour
     bounds = _dashHilite.getBounds();
-    window._dashClipCoords = coords;                       // contour เฉพาะในโซน
+    window._dashClipCoords = zonePoly;                     // contour เฉพาะในโซน
   } else {
     const members = _dashMembers(key);
     const src = SENSORS.find(x => String(x.id) === String(key));
