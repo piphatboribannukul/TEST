@@ -1,10 +1,10 @@
 // FRCContour v37.0 — MWA Water Quality Division
 // สร้างใหม่จาก v36.3: แยก data → data/*.js, ระบบ version จุดเดียว, ตัด dead code
 
-const APP_VERSION = '37.0';
+const APP_VERSION = '37.1';
 function appBadge(suffix){ return '⬡ V' + APP_VERSION + (suffix ? '+' + suffix : ''); }
 
-// ── สารบัญ (ค้นหา "[N/11]" เพื่อกระโดดไป section) ──
+// ── สารบัญ (ค้นหา "[N/12]" เพื่อกระโดดไป section) ──
 //   [1/11] CORE ENGINE — map, contour, Dijkstra, K chain (3-priority), tempK Arrhenius, RTU, live poll, report
 //   [2/11] ZONES — zone store, DEFAULT_ZONES, zone editor, district boundaries
 //   [3/11] DISCLAIMER TICKER — โหมด FRC/EC
@@ -16,6 +16,7 @@ function appBadge(suffix){ return '⬡ V' + APP_VERSION + (suffix ? '+' + suffix
 //   [9/11] VC SIM — valve control simulation
 //   [10/11] RAW WATER EC — สีและ interpolation
 //   [11/11] RAW WATER STATIONS + ALERTS + BOOT — แม่กลอง/เจ้าพระยา, แจ้งเตือน, init สุดท้าย
+//   [12/12] DASHBOARD — GISTDA-style landing view, tab bar, zone cards
 
 // ═══════════ [1/11] CORE ENGINE — map, contour, Dijkstra, K chain (3-priority), tempK Arrhenius, RTU, live poll, report ═══════════
 // ── API Configuration ──────────────────────────────────────────────────────
@@ -4350,6 +4351,7 @@ function updateStats() {
     _css('s-total','color','#cc0055'); _css('s-avg','color','#cc0055');
     _css('s-hi','color','#cc0055'); _css('s-lo','color','#c08000');
   }
+  try { if (typeof buildDashboard === 'function') buildDashboard(); } catch(e) {}
 }
 
 function updateLegendPanel() {
@@ -14302,3 +14304,168 @@ document.querySelectorAll('.v30-scale-section input').forEach(inp => {
     );
   };
 })();
+
+// ═══════════ [12/12] DASHBOARD — GISTDA-style landing view (v37.1) ═══════════
+let DASH_GROUP = 'zone';   // 'zone' = อิทธิพลสูบจ่าย (SP/SW) | 'branch' = สาขา สจ.
+let _dashChart = null;
+let _dashLastTab = 'dash';
+
+function setTab(tab) {
+  // Forecast/Report = action tabs: เปิด panel เดิม แล้วคงอยู่ view ปัจจุบัน
+  if (tab === 'forecast') {
+    if (typeof openForecastBar === 'function') openForecastBar();
+    _flashTab('mtab-forecast'); return;
+  }
+  if (tab === 'report') {
+    if (typeof openReport === 'function') openReport();
+    _flashTab('mtab-report'); return;
+  }
+  _dashLastTab = tab;
+  document.body.classList.toggle('dash-mode', tab === 'dash');
+  document.querySelectorAll('.mtab').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('mtab-' + tab);
+  if (btn) btn.classList.add('active');
+  if (tab === 'dash') {
+    try { map.fitBounds([[13.45, 100.25], [14.10, 100.97]]); } catch (e) {}
+    buildDashboard();
+  } else {
+    try { map.invalidateSize(); } catch (e) {}
+  }
+}
+function _flashTab(id) {
+  const b = document.getElementById(id); if (!b) return;
+  b.classList.add('active');
+  setTimeout(() => { b.classList.remove('active');
+    const cur = document.getElementById('mtab-' + _dashLastTab); if (cur) cur.classList.add('active'); }, 600);
+}
+function setDashGroup(g) {
+  DASH_GROUP = g;
+  document.getElementById('dash-grp-zone').classList.toggle('on', g === 'zone');
+  document.getElementById('dash-grp-branch').classList.toggle('on', g === 'branch');
+  buildDashboard();
+}
+
+// ── กำหนดสถานี monitor → โซนอิทธิพลสูบจ่าย (polygon ก่อน, ใกล้สุด fallback) ──
+function _dashZoneOf(m) {
+  if (window.CUSTOM_ZONES) {
+    for (const [sid, zone] of Object.entries(window.CUSTOM_ZONES)) {
+      if (sid.startsWith('VC') || !zone.coords || zone.coords.length < 3) continue;
+      if (_pip(m.lat, m.lon, zone.coords)) return sid;
+    }
+  }
+  const sources = (typeof _ensureFrcSources === 'function') ? _ensureFrcSources() : [];
+  let best = null, bd = Infinity;
+  for (const s of sources) {
+    const d = (s.lat - m.lat) ** 2 + (s.lon - m.lon) ** 2;
+    if (d < bd) { bd = d; best = String(s.id); }
+  }
+  return best || '?';
+}
+function _dashZoneName(sid) {
+  const s = SENSORS.find(x => String(x.id) === String(sid));
+  if (!s) return sid;
+  return String(s.name || sid).replace(/^สถานีสูบจ่ายน้ำ/, '').replace(/^สถานีสูบส่งน้ำ/, '').trim() || sid;
+}
+
+function _dashStats() {
+  const monitors = SENSORS.filter(s => s.type === 'monitor' && s.frc != null && isFinite(s.frc));
+  const n = monitors.length;
+  const pass = monitors.filter(m => m.frc >= 0.2).length;
+  const vals = monitors.map(m => m.frc).sort((a, b) => a - b);
+  const avg = n ? vals.reduce((a, b) => a + b, 0) / n : 0;
+  const med = n ? vals[Math.floor(n / 2)] : 0;
+  const watch = monitors.filter(m => m.frc < 0.3).sort((a, b) => a.frc - b.frc);
+  // group
+  const groups = {};
+  for (const m of monitors) {
+    const key = DASH_GROUP === 'zone' ? _dashZoneOf(m) : (m.area || 'อื่น ๆ');
+    (groups[key] = groups[key] || []).push(m);
+  }
+  const gRows = Object.entries(groups).map(([key, arr]) => ({
+    key, label: DASH_GROUP === 'zone' ? _dashZoneName(key) : String(key).replace(/^สจ\./, ''),
+    avg: arr.reduce((a, b) => a + b.frc, 0) / arr.length,
+    min: Math.min(...arr.map(x => x.frc)), n: arr.length,
+    lat: arr.reduce((a, b) => a + b.lat, 0) / arr.length,
+    lon: arr.reduce((a, b) => a + b.lon, 0) / arr.length
+  })).sort((a, b) => a.avg - b.avg);
+  return { n, pass, avg, med, watch, gRows };
+}
+
+function buildDashboard() {
+  if (!document.body.classList.contains('dash-mode')) return;
+  if (!SENSORS || !SENSORS.length) return;
+  const st = _dashStats();
+
+  // ── donut % ผ่านเกณฑ์ ──
+  const pct = st.n ? Math.round(st.pass / st.n * 100) : 0;
+  const R = 44, C = 2 * Math.PI * R;
+  const col = pct >= 95 ? '#16a34a' : pct >= 85 ? '#84cc16' : pct >= 70 ? '#f59e0b' : '#dc2626';
+  document.getElementById('dash-donut').innerHTML =
+    `<circle cx="55" cy="55" r="${R}" fill="none" stroke="#eef2f7" stroke-width="11"/>` +
+    `<circle cx="55" cy="55" r="${R}" fill="none" stroke="${col}" stroke-width="11" stroke-linecap="round"` +
+    ` stroke-dasharray="${(pct / 100 * C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 55 55)"/>` +
+    `<text x="55" y="51" text-anchor="middle" font-size="19" font-weight="800" fill="#1e3a5f" font-family="JetBrains Mono,monospace">${pct}%</text>` +
+    `<text x="55" y="68" text-anchor="middle" font-size="9" fill="#94a3b8">ผ่านเกณฑ์</text>`;
+  document.getElementById('dash-donut-stats').innerHTML =
+    `ผ่าน ≥0.2 mg/L: <b>${st.pass}/${st.n}</b> สถานี<br>` +
+    `เฉลี่ยทั้งระบบ: <b>${st.avg.toFixed(2)}</b> mg/L<br>` +
+    `มัธยฐาน: <b>${st.med.toFixed(2)}</b> mg/L`;
+
+  // ── watchlist < 0.3 ──
+  const wl = document.getElementById('dash-watch-list');
+  document.getElementById('dash-watch-meta').textContent = 'FRC < 0.3 mg/L · ' + st.watch.length + ' สถานี';
+  wl.innerHTML = st.watch.length ? st.watch.map(m =>
+    `<div class="dw-item" onclick="dashGoto(${m.lat},${m.lon})">` +
+    `<span class="dw-name">${(m.name || m.id)}</span>` +
+    `<span class="dw-val" style="color:${frcColor(m.frc)}">${m.frc.toFixed(2)}</span></div>`).join('')
+    : '<div class="dw-empty">✅ ทุกสถานี ≥ 0.3 mg/L</div>';
+
+  // ── model / system card ──
+  const rtuN = SENSORS.filter(s => s.rtuPressure > 0).length;
+  const tf = window._tempKFactor || 1;
+  document.getElementById('dash-model').innerHTML =
+    `<h4>🧪 สถานะระบบ</h4>` +
+    `<div style="font-size:11px;line-height:2;color:#475569;">` +
+    `สถานะข้อมูล: <b style="color:${(typeof apiStatus !== 'undefined' && apiStatus === 'live') ? '#16a34a' : '#d97706'}">${(typeof apiStatus !== 'undefined' && apiStatus === 'live') ? '● Live' : '⚠ ' + (typeof apiStatus !== 'undefined' ? apiStatus : '-')}</b>` +
+    ` · RTU→sensor: <b>${rtuN}/${SENSORS.length}</b><br>` +
+    `🌡 อุณหภูมิระบบ: <b>${window._sysTempC ? window._sysTempC + '°C' : '–'}</b> · K factor: <b>×${tf.toFixed(2)}</b>${tf === 1 ? ' (OFF)' : ''}<br>` +
+    `แหล่งจ่าย: Kb 0.778 บข. / 0.400 มส. (กนว.32/2566)</div>`;
+
+  // ── zone cards ──
+  document.getElementById('dash-zones').innerHTML = st.gRows.map(g => {
+    const c = frcColor(g.avg);
+    return `<div class="dz-card" onclick="dashGoto(${g.lat},${g.lon})">` +
+      `<svg width="34" height="34" viewBox="0 0 34 34"><circle cx="17" cy="17" r="13" fill="none" stroke="#eef2f7" stroke-width="5"/>` +
+      `<circle cx="17" cy="17" r="13" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(Math.min(g.avg / 1.5, 1) * 81.7).toFixed(1)} 81.7" transform="rotate(-90 17 17)"/></svg>` +
+      `<div class="dz-info"><div class="dz-name">${g.label}</div><div class="dz-sub">${g.n} สถานี · ต่ำสุด ${g.min.toFixed(2)}</div></div>` +
+      `<span class="dz-val" style="color:${c}">${g.avg.toFixed(2)}</span></div>`;
+  }).join('');
+
+  // ── bar chart ──
+  document.getElementById('dash-updated').textContent =
+    'ปรับปรุงล่าสุด: ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  try {
+    const ctx = document.getElementById('dash-chart').getContext('2d');
+    const labels = st.gRows.map(g => g.label);
+    const data = st.gRows.map(g => +g.avg.toFixed(2));
+    const colors = st.gRows.map(g => frcColor(g.avg));
+    if (_dashChart) { _dashChart.data.labels = labels; _dashChart.data.datasets[0].data = data;
+      _dashChart.data.datasets[0].backgroundColor = colors; _dashChart.update('none'); }
+    else {
+      _dashChart = new Chart(ctx, { type: 'bar',
+        data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 5, maxBarThickness: 26 }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' FRC เฉลี่ย ' + c.parsed.y + ' mg/L' } } },
+          scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { size: 9 } } },
+                    x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 45, minRotation: 30 } } } } });
+    }
+  } catch (e) { console.warn('[Dash] chart:', e.message); }
+}
+
+function dashGoto(lat, lon) {
+  setTab('map');
+  setTimeout(() => { try { map.flyTo([lat, lon], 13.5); } catch (e) {} }, 120);
+}
+
+// boot: หน้าแรก = แดชบอร์ด (body มี class dash-mode จาก HTML แล้ว)
+setTimeout(() => { try { buildDashboard(); } catch (e) { console.warn('[Dash] boot:', e.message); } }, 1800);
