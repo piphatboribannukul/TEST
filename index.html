@@ -2351,8 +2351,8 @@ body.dash-mode #sidebar,body.dash-mode #about-btn,body.dash-mode #terrain3d-btn,
     <button class="mtab" id="mtab-map" onclick="setTab('map')">🗺️ แผนที่</button>
     <button class="mtab" id="mtab-forecast" onclick="setTab('forecast')">📈 คาดการณ์</button>
     <button class="mtab" id="mtab-report" onclick="setTab('report')">📋 รายงาน</button>
-    <button class="mtab" id="mtab-3d" onclick="open3DTerrain()">🧊 3D</button>
-    <button class="mtab" id="mtab-cl2" onclick="toggleWhatIfPanel()">Cl₂ จำลอง</button>
+    <button class="mtab" id="mtab-3d" onclick="dashOpen3D()">🧊 3D</button>
+    <button class="mtab" id="mtab-cl2" onclick="dashOpenWhatIf()">Cl₂ จำลอง</button>
   </nav>
   <div id="param-switcher">
     <button class="param-btn active" id="btn-frc" onclick="setParam('frc')">🌸 FRC</button>
@@ -3653,8 +3653,8 @@ I=ค่าจริง, AA=ค่า contour, tt=travel time<br>
     <div id="dash-chart-head">
       <h4 style="margin:0;" id="dash-chart-title">📊 FRC เฉลี่ยรายพื้นที่</h4>
       <span class="dash-toggle">
-        <button id="dash-grp-zone" class="on" onclick="setDashGroup('zone')">โซนสูบจ่าย</button>
-        <button id="dash-grp-branch" onclick="setDashGroup('branch')">สาขา</button>
+        <button id="dash-grp-src" class="on" onclick="setDashGroup('src')">ต้นทาง (สถานีสูบจ่าย)</button>
+        <button id="dash-grp-avg" onclick="setDashGroup('avg')">เฉลี่ยพื้นที่อิทธิพล</button>
       </span>
       <span class="dash-meta" id="dash-updated"></span>
     </div>

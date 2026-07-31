@@ -1857,20 +1857,6 @@ function _drawOnCanvas() {
     return [pt.x - origin.x, pt.y - origin.y];
   };
 
-  // v37.1: เลือกโซนจากแดชบอร์ด → วาด contour เฉพาะในกรอบโซน (นอกโซน = แผนที่พื้น)
-  let _clipOn = false;
-  if (window._dashClipCoords && window._dashClipCoords.length > 2) {
-    ctx.save();
-    ctx.beginPath();
-    window._dashClipCoords.forEach((c, k) => {
-      const xy = toXY(c[0], c[1]);
-      k === 0 ? ctx.moveTo(xy[0], xy[1]) : ctx.lineTo(xy[0], xy[1]);
-    });
-    ctx.closePath();
-    ctx.clip();
-    _clipOn = true;
-  }
-
   // ── 1. สร้าง IDW value grid ในพิกัด lat/lon (RES×RES) ──────────────
   const RES = 100;
   const latRange = b.getNorth() - b.getSouth();
@@ -1898,13 +1884,23 @@ function _drawOnCanvas() {
     mctx.fillRect(0,0,W,H);
     mctx.fillStyle='#fff';
     mctx.beginPath();
-    for(const poly of [...STA_POLYS,...MWA_POLYS]) {
-      let first=true;
-      for(const [la,lo] of poly.coords) {
-        const [x,y]=toXY(la,lo);
-        if(first){mctx.moveTo(x,y);first=false;} else mctx.lineTo(x,y);
+    if (window._dashClipCoords && window._dashClipCoords.length > 2) {
+      // v37.1: เลือกโซนจากแดชบอร์ด → contour เฉพาะในพื้นที่อิทธิพลนั้น (นอกกรอบ = แผนที่พื้น)
+      let first = true;
+      for (const [la, lo] of window._dashClipCoords) {
+        const [x, y] = toXY(la, lo);
+        if (first) { mctx.moveTo(x, y); first = false; } else mctx.lineTo(x, y);
       }
       mctx.closePath();
+    } else {
+      for(const poly of [...STA_POLYS,...MWA_POLYS]) {
+        let first=true;
+        for(const [la,lo] of poly.coords) {
+          const [x,y]=toXY(la,lo);
+          if(first){mctx.moveTo(x,y);first=false;} else mctx.lineTo(x,y);
+        }
+        mctx.closePath();
+      }
     }
     mctx.fill('nonzero');
     const maskData = mctx.getImageData(0,0,PW,PH).data;
@@ -2105,7 +2101,6 @@ function _drawOnCanvas() {
 
     ctx.restore();
   }
-  if (_clipOn) ctx.restore();
 }
 
 // ระหว่าง pan → แค่ขยับ canvas ตาม layerPoint ใหม่ (ไม่ redraw)
@@ -14322,17 +14317,17 @@ document.querySelectorAll('.v30-scale-section input').forEach(inp => {
 })();
 
 // ═══════════ [12/12] DASHBOARD — GISTDA-style landing view (v37.1) ═══════════
-let DASH_GROUP = 'zone';   // 'zone' = อิทธิพลสูบจ่าย (SP/SW) | 'branch' = สาขา สจ.
+let DASH_GROUP = 'src';    // 'src' = ค่าต้นทางสถานีสูบจ่าย | 'avg' = เฉลี่ยพื้นที่อิทธิพล (ต้นทาง+ปลายทาง)
 let _dashChart = null;
 let _dashLastTab = 'dash';
 let _dashRows = [];
 let _dashHilite = null;
 let _dashSelKey = null;
-let _dashAreaByName = null;
 
 function setTab(tab) {
   if (tab === 'forecast') {
-    if (typeof openForecastBar === 'function') openForecastBar();
+    if (document.body.classList.contains('dash-mode')) setTab('map');   // view สะอาดก่อน
+    setTimeout(() => { if (typeof openForecastBar === 'function') openForecastBar(); }, 260);
     _flashTab('mtab-forecast'); return;
   }
   if (tab === 'report') {
@@ -14353,6 +14348,16 @@ function setTab(tab) {
     buildDashboard();
   }
 }
+
+function dashOpenWhatIf() {
+  if (document.body.classList.contains('dash-mode')) setTab('map');    // Cl₂ จำลองบนแผนที่เต็ม
+  setTimeout(() => { if (typeof toggleWhatIfPanel === 'function') toggleWhatIfPanel(); }, 260);
+  _flashTab('mtab-cl2');
+}
+function dashOpen3D() {
+  if (typeof open3DTerrain === 'function') open3DTerrain();
+  _flashTab('mtab-3d');
+}
 function _flashTab(id) {
   const b = document.getElementById(id); if (!b) return;
   b.classList.add('active');
@@ -14361,9 +14366,8 @@ function _flashTab(id) {
 }
 function setDashGroup(g) {
   DASH_GROUP = g;
-  _dashClearSelect();
-  document.getElementById('dash-grp-zone').classList.toggle('on', g === 'zone');
-  document.getElementById('dash-grp-branch').classList.toggle('on', g === 'branch');
+  document.getElementById('dash-grp-src').classList.toggle('on', g === 'src');
+  document.getElementById('dash-grp-avg').classList.toggle('on', g === 'avg');
   buildDashboard();
 }
 
@@ -14379,11 +14383,18 @@ function _dFmt(v) { return _dIsEc() ? Math.round(v) : v.toFixed(2); }
 
 // ── สังกัด: โซนอิทธิพล (polygon → ใกล้สุด) / สาขา (area → fallback lookup ตามชื่อ) ──
 function _dashZoneOf(m) {
+  const _distToSid = sid => {
+    const s = SENSORS.find(x => String(x.id) === String(sid));
+    return s ? (s.lat - m.lat) ** 2 + (s.lon - m.lon) ** 2 : Infinity;
+  };
   if (window.CUSTOM_ZONES) {
+    const hits = [];
     for (const [sid, zone] of Object.entries(window.CUSTOM_ZONES)) {
       if (sid.startsWith('VC') || !zone.coords || zone.coords.length < 3) continue;
-      if (_pip(m.lat, m.lon, zone.coords)) return sid;
+      if (_pip(m.lat, m.lon, zone.coords)) hits.push(sid);
     }
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return hits.sort((a, b) => _distToSid(a) - _distToSid(b))[0];  // ซ้อนกัน → ต้นทางใกล้สุด
   }
   const sources = (typeof _ensureFrcSources === 'function') ? _ensureFrcSources() : [];
   let best = null, bd = Infinity;
@@ -14393,19 +14404,8 @@ function _dashZoneOf(m) {
   }
   return best || '?';
 }
-function _dashBranchOf(m) {
-  if (!_dashAreaByName) {
-    _dashAreaByName = {};
-    try { for (const f of SENSORS_FALLBACK) if (f.area) _dashAreaByName[String(f.name).trim()] = String(f.area).trim(); } catch (e) {}
-  }
-  const raw = (m.area && String(m.area).trim()) || _dashAreaByName[String(m.name || '').trim()] || '';
-  if (raw.startsWith('สจ.')) return raw;                       // สาขาแท้
-  const nm = String(m.name || '');
-  const mm = nm.match(/สำนักงานประปาสาขา(.+)/);                 // เดาจากชื่อ สนป.
-  if (mm) return 'สจ.' + mm[1].trim();
-  return 'ยังไม่ระบุสาขา';                                      // แท็กโซน (Dis/รง./สูบจ่าย ฯลฯ)
-}
-function _dashKeyOf(m) { return DASH_GROUP === 'zone' ? _dashZoneOf(m) : _dashBranchOf(m); }
+
+function _dashKeyOf(m) { return _dashZoneOf(m); }
 function _dashMonitors() {
   return SENSORS.filter(s => s.type === 'monitor' && _dVal(s) != null && isFinite(_dVal(s)));
 }
@@ -14423,7 +14423,7 @@ function _dashZoneName(sid) {
 }
 
 function _dashStats() {
-  const all = _dashAllStations();                 // ข้อ 5: รวม 61 สถานี
+  const all = _dashAllStations();
   const n = all.length;
   const vals = all.map(_dVal).sort((a, b) => a - b);
   const avg = n ? vals.reduce((a, b) => a + b, 0) / n : 0;
@@ -14433,36 +14433,21 @@ function _dashStats() {
   const watch = all.filter(m => isEc ? _dVal(m) >= 300 : _dVal(m) < 0.3)
     .sort((a, b) => isEc ? _dVal(b) - _dVal(a) : _dVal(a) - _dVal(b));
 
-  let gRows;
-  if (DASH_GROUP === 'zone') {
-    // ข้อ 6: แถวจากสถานีสูบจ่าย/โรงงานทั้งหมด — โซนไม่มี monitor ก็แสดง (ใช้ค่าต้นทาง)
-    const monitors = _dashMonitors();
-    const memberMap = {};
-    for (const m of monitors) { const k = _dashZoneOf(m); (memberMap[k] = memberMap[k] || []).push(m); }
-    gRows = _dashSources().map(src => {
-      const key = String(src.id);
-      const mem = memberMap[key] || [];
-      const srcVal = _dVal(src);
-      const mAvg = mem.length ? mem.reduce((a, b) => a + _dVal(b), 0) / mem.length : null;
-      return { key, label: _dashZoneName(key), srcVal,
-        avg: mAvg != null ? mAvg : srcVal, min: mem.length ? Math.min(...mem.map(_dVal)) : srcVal,
-        max: mem.length ? Math.max(...mem.map(_dVal)) : srcVal, n: mem.length,
-        bar: srcVal != null ? srcVal : mAvg,      // แท่งกราฟ = ค่าของสถานีสูบจ่ายเอง
-        lat: src.lat, lon: src.lon };
-    }).filter(r => r.bar != null && isFinite(r.bar));
-  } else {
-    const monitors = _dashMonitors();
-    const groups = {};
-    for (const m of monitors) { const k = _dashBranchOf(m); (groups[k] = groups[k] || []).push(m); }
-    gRows = Object.entries(groups).map(([key, arr]) => ({
-      key, label: key.replace(/^สจ\./, ''), srcVal: null,
-      avg: arr.reduce((a, b) => a + _dVal(b), 0) / arr.length,
-      min: Math.min(...arr.map(_dVal)), max: Math.max(...arr.map(_dVal)), n: arr.length,
-      bar: arr.reduce((a, b) => a + _dVal(b), 0) / arr.length,
-      lat: arr.reduce((a, b) => a + b.lat, 0) / arr.length,
-      lon: arr.reduce((a, b) => a + b.lon, 0) / arr.length
-    }));
-  }
+  // แถว = สถานีสูบจ่าย/โรงงานครบทุกแห่ง · เฉลี่ยพื้นที่ = ต้นทาง + สถานีรับน้ำ (ตามเจตนา: พื้นที่ข้างสถานีใช้ต้นทางเป็นตัวแทน)
+  const monitors = _dashMonitors();
+  const memberMap = {};
+  for (const m of monitors) { const k = _dashKeyOf(m); (memberMap[k] = memberMap[k] || []).push(m); }
+  const gRows = _dashSources().map(src => {
+    const key = String(src.id);
+    const mem = memberMap[key] || [];
+    const srcVal = _dVal(src);
+    const pool = (srcVal != null ? [srcVal] : []).concat(mem.map(_dVal));
+    const combAvg = pool.length ? pool.reduce((a, b) => a + b, 0) / pool.length : null;
+    const bar = DASH_GROUP === 'src' ? (srcVal != null ? srcVal : combAvg) : combAvg;
+    return { key, label: _dashZoneName(key), srcVal, avg: combAvg,
+      min: pool.length ? Math.min(...pool) : null, max: pool.length ? Math.max(...pool) : null,
+      n: mem.length, bar, lat: src.lat, lon: src.lon };
+  }).filter(r => r.bar != null && isFinite(r.bar));
   gRows.sort((a, b) => _dIsEc() ? b.bar - a.bar : a.bar - b.bar);
   return { n, pass, avg, med, watch, gRows };
 }
@@ -14518,9 +14503,9 @@ function buildDashboard() {
     const v = g.bar;
     const c = _dCol(v);
     const frac = Math.min(isEc ? v / 500 : v / 1.5, 1);
-    const sub = DASH_GROUP === 'zone'
-      ? (g.n ? `รับน้ำ ${g.n} สถานี · เฉลี่ย ${_dFmt(g.avg)}` : 'ไม่มีสถานี monitor ในโซน')
-      : `${g.n} สถานี · ${isEc ? 'สูงสุด ' + Math.round(g.max) : 'ต่ำสุด ' + g.min.toFixed(2)}`;
+    const sub = DASH_GROUP === 'src'
+      ? (g.n ? `รับน้ำ ${g.n} สถานี · เฉลี่ยพื้นที่ ${_dFmt(g.avg)}` : 'ยังไม่มีจุดตรวจปลายทาง')
+      : (g.n ? `ต้นทาง ${g.srcVal != null ? _dFmt(g.srcVal) : '–'} · รับน้ำ ${g.n} สถานี` : `ใช้ค่าต้นทาง (ไม่มีจุดตรวจปลายทาง)`);
     return `<div class="dz-card${String(g.key) === String(_dashSelKey) ? ' sel' : ''}" onclick="dashSelectZone('${String(g.key).replace(/'/g, "\\'")}')">` +
       `<svg width="34" height="34" viewBox="0 0 34 34"><circle cx="17" cy="17" r="13" fill="none" stroke="#eef2f7" stroke-width="5"/>` +
       `<circle cx="17" cy="17" r="13" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(frac * 81.7).toFixed(1)} 81.7" transform="rotate(-90 17 17)"/></svg>` +
@@ -14530,7 +14515,7 @@ function buildDashboard() {
 
   // ── bar chart ──
   document.getElementById('dash-chart-title').textContent =
-    `📊 ${isEc ? 'EC' : 'FRC'} เฉลี่ยรายพื้นที่ (${U})`;
+    `📊 ${isEc ? 'EC' : 'FRC'} รายพื้นที่อิทธิพล — ${DASH_GROUP === 'src' ? 'ค่าต้นทางสถานีสูบจ่าย' : 'เฉลี่ยทั้งพื้นที่ (ต้นทาง+ปลายทาง)'} (${U})`;
   document.getElementById('dash-updated').textContent =
     'ปรับปรุงล่าสุด: ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
   try {
@@ -14555,6 +14540,7 @@ function buildDashboard() {
 
 // ── เลือกโซน: กรอบพื้นที่อิทธิพล + การ์ดรายละเอียด (ต้นทาง + สถานีรับน้ำ) ──
 function dashSelectZone(key) {
+  if (String(key) === String(_dashSelKey)) { _dashClearSelect(); buildDashboard(); return; }  // กดซ้ำ = ยกเลิก
   const row = _dashRows.find(r => String(r.key) === String(key));
   if (!row) return;
   _dashSelKey = key;
@@ -14612,7 +14598,7 @@ function _dashRenderDetail(key, row) {
     `<button class="dd-close" onclick="_dashClearSelect()">✕</button>` +
     `<h4>📍 ${row.label}</h4>` + srcHtml +
     `<div class="dd-note">▧ กรอบเส้นประสีน้ำเงินบนแผนที่ = ${DASH_GROUP === 'zone' ? 'พื้นที่อิทธิพลสูบจ่าย' : 'ขอบเขตสถานีในสาขา'}</div>` +
-    `<div class="dash-meta" style="margin-bottom:4px;">${members.length ? 'สถานีรับน้ำ ' + members.length + ' แห่ง · เฉลี่ย ' + _dFmt(row.avg) + ' ' + _dUnit() : 'ไม่มีสถานี monitor ในพื้นที่นี้ — แสดงค่าจากสถานีต้นทาง'}</div>` +
+    `<div class="dash-meta" style="margin-bottom:4px;">${members.length ? 'สถานีรับน้ำ ' + members.length + ' แห่ง · เฉลี่ยพื้นที่ (รวมต้นทาง) ' + _dFmt(row.avg) + ' ' + _dUnit() : 'ยังไม่มีจุดตรวจปลายทางในพื้นที่นี้ — ใช้ค่าสถานีต้นทางเป็นตัวแทน'}</div>` +
     members.map(m =>
       `<div class="dw-item" onclick="dashGoto(${m.lat},${m.lon})">` +
       `<span class="dw-name">${m.name || m.id}</span>` +
@@ -14624,6 +14610,11 @@ function dashGoto(lat, lon) {
   setTab('map');
   setTimeout(() => { try { map.flyTo([lat, lon], 13.5); } catch (e) {} }, 200);
 }
+
+// ESC = ล้างการเลือกโซน
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && _dashSelKey) { _dashClearSelect(); buildDashboard(); }
+});
 
 // boot: หน้าแรก = แดชบอร์ด
 setTimeout(() => { try { buildDashboard(); } catch (e) { console.warn('[Dash] boot:', e.message); } }, 1800);
