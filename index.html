@@ -2331,7 +2331,7 @@ body.dash-mode .dash-panel{display:flex;flex-direction:column;gap:10px;}
 /* ── ซ่อน chrome โหมดแผนที่เมื่ออยู่แดชบอร์ด ── */
 body.dash-mode #ham-btn,body.dash-mode #map-search-wrap,body.dash-mode #v30-tab-btn,
 body.dash-mode #ai-insight-btn,body.dash-mode #flow-btn,body.dash-mode #legend-panel,
-body.dash-mode #sidebar,body.dash-mode #about-btn{display:none !important;}
+body.dash-mode #sidebar,body.dash-mode #about-btn,body.dash-mode #terrain3d-btn,body.dash-mode #whatif-btn{display:none !important;}
 @media (max-width:900px){
   #dash-left{width:248px;}#dash-right{width:238px;}
   body.dash-mode #map{left:270px;right:260px;}
@@ -2351,6 +2351,8 @@ body.dash-mode #sidebar,body.dash-mode #about-btn{display:none !important;}
     <button class="mtab" id="mtab-map" onclick="setTab('map')">🗺️ แผนที่</button>
     <button class="mtab" id="mtab-forecast" onclick="setTab('forecast')">📈 คาดการณ์</button>
     <button class="mtab" id="mtab-report" onclick="setTab('report')">📋 รายงาน</button>
+    <button class="mtab" id="mtab-3d" onclick="open3DTerrain()">🧊 3D</button>
+    <button class="mtab" id="mtab-cl2" onclick="toggleWhatIfPanel()">Cl₂ จำลอง</button>
   </nav>
   <div id="param-switcher">
     <button class="param-btn active" id="btn-frc" onclick="setParam('frc')">🌸 FRC</button>

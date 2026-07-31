@@ -1857,6 +1857,20 @@ function _drawOnCanvas() {
     return [pt.x - origin.x, pt.y - origin.y];
   };
 
+  // v37.1: เลือกโซนจากแดชบอร์ด → วาด contour เฉพาะในกรอบโซน (นอกโซน = แผนที่พื้น)
+  let _clipOn = false;
+  if (window._dashClipCoords && window._dashClipCoords.length > 2) {
+    ctx.save();
+    ctx.beginPath();
+    window._dashClipCoords.forEach((c, k) => {
+      const xy = toXY(c[0], c[1]);
+      k === 0 ? ctx.moveTo(xy[0], xy[1]) : ctx.lineTo(xy[0], xy[1]);
+    });
+    ctx.closePath();
+    ctx.clip();
+    _clipOn = true;
+  }
+
   // ── 1. สร้าง IDW value grid ในพิกัด lat/lon (RES×RES) ──────────────
   const RES = 100;
   const latRange = b.getNorth() - b.getSouth();
@@ -2091,6 +2105,7 @@ function _drawOnCanvas() {
 
     ctx.restore();
   }
+  if (_clipOn) ctx.restore();
 }
 
 // ระหว่าง pan → แค่ขยับ canvas ตาม layerPoint ใหม่ (ไม่ redraw)
@@ -14379,16 +14394,26 @@ function _dashZoneOf(m) {
   return best || '?';
 }
 function _dashBranchOf(m) {
-  if (m.area && String(m.area).trim()) return String(m.area).trim();
   if (!_dashAreaByName) {
     _dashAreaByName = {};
     try { for (const f of SENSORS_FALLBACK) if (f.area) _dashAreaByName[String(f.name).trim()] = String(f.area).trim(); } catch (e) {}
   }
-  return _dashAreaByName[String(m.name || '').trim()] || 'อื่น ๆ';
+  const raw = (m.area && String(m.area).trim()) || _dashAreaByName[String(m.name || '').trim()] || '';
+  if (raw.startsWith('สจ.')) return raw;                       // สาขาแท้
+  const nm = String(m.name || '');
+  const mm = nm.match(/สำนักงานประปาสาขา(.+)/);                 // เดาจากชื่อ สนป.
+  if (mm) return 'สจ.' + mm[1].trim();
+  return 'ยังไม่ระบุสาขา';                                      // แท็กโซน (Dis/รง./สูบจ่าย ฯลฯ)
 }
 function _dashKeyOf(m) { return DASH_GROUP === 'zone' ? _dashZoneOf(m) : _dashBranchOf(m); }
 function _dashMonitors() {
   return SENSORS.filter(s => s.type === 'monitor' && _dVal(s) != null && isFinite(_dVal(s)));
+}
+function _dashAllStations() {   // ทุกสถานีที่มีค่า (monitor + pump/plant) — ใช้กับภาพรวม/เฝ้าระวัง
+  return SENSORS.filter(s => _dVal(s) != null && isFinite(_dVal(s)));
+}
+function _dashSources() {
+  return SENSORS.filter(s => _SOURCE_TYPES.has(s.type));
 }
 function _dashMembers(key) { return _dashMonitors().filter(m => _dashKeyOf(m) === key); }
 function _dashZoneName(sid) {
@@ -14398,24 +14423,47 @@ function _dashZoneName(sid) {
 }
 
 function _dashStats() {
-  const monitors = _dashMonitors();
-  const n = monitors.length;
-  const vals = monitors.map(_dVal).sort((a, b) => a - b);
+  const all = _dashAllStations();                 // ข้อ 5: รวม 61 สถานี
+  const n = all.length;
+  const vals = all.map(_dVal).sort((a, b) => a - b);
   const avg = n ? vals.reduce((a, b) => a + b, 0) / n : 0;
   const med = n ? vals[Math.floor(n / 2)] : 0;
   const isEc = _dIsEc();
-  const pass = monitors.filter(m => isEc ? _dVal(m) < 300 : _dVal(m) >= 0.2).length;
-  const watch = monitors.filter(m => isEc ? _dVal(m) >= 300 : _dVal(m) < 0.3)
+  const pass = all.filter(m => isEc ? _dVal(m) < 300 : _dVal(m) >= 0.2).length;
+  const watch = all.filter(m => isEc ? _dVal(m) >= 300 : _dVal(m) < 0.3)
     .sort((a, b) => isEc ? _dVal(b) - _dVal(a) : _dVal(a) - _dVal(b));
-  const groups = {};
-  for (const m of monitors) { const k = _dashKeyOf(m); (groups[k] = groups[k] || []).push(m); }
-  const gRows = Object.entries(groups).map(([key, arr]) => ({
-    key, label: DASH_GROUP === 'zone' ? _dashZoneName(key) : String(key).replace(/^สจ\./, ''),
-    avg: arr.reduce((a, b) => a + _dVal(b), 0) / arr.length,
-    min: Math.min(...arr.map(_dVal)), max: Math.max(...arr.map(_dVal)), n: arr.length,
-    lat: arr.reduce((a, b) => a + b.lat, 0) / arr.length,
-    lon: arr.reduce((a, b) => a + b.lon, 0) / arr.length
-  })).sort((a, b) => _dIsEc() ? b.avg - a.avg : a.avg - b.avg);
+
+  let gRows;
+  if (DASH_GROUP === 'zone') {
+    // ข้อ 6: แถวจากสถานีสูบจ่าย/โรงงานทั้งหมด — โซนไม่มี monitor ก็แสดง (ใช้ค่าต้นทาง)
+    const monitors = _dashMonitors();
+    const memberMap = {};
+    for (const m of monitors) { const k = _dashZoneOf(m); (memberMap[k] = memberMap[k] || []).push(m); }
+    gRows = _dashSources().map(src => {
+      const key = String(src.id);
+      const mem = memberMap[key] || [];
+      const srcVal = _dVal(src);
+      const mAvg = mem.length ? mem.reduce((a, b) => a + _dVal(b), 0) / mem.length : null;
+      return { key, label: _dashZoneName(key), srcVal,
+        avg: mAvg != null ? mAvg : srcVal, min: mem.length ? Math.min(...mem.map(_dVal)) : srcVal,
+        max: mem.length ? Math.max(...mem.map(_dVal)) : srcVal, n: mem.length,
+        bar: srcVal != null ? srcVal : mAvg,      // แท่งกราฟ = ค่าของสถานีสูบจ่ายเอง
+        lat: src.lat, lon: src.lon };
+    }).filter(r => r.bar != null && isFinite(r.bar));
+  } else {
+    const monitors = _dashMonitors();
+    const groups = {};
+    for (const m of monitors) { const k = _dashBranchOf(m); (groups[k] = groups[k] || []).push(m); }
+    gRows = Object.entries(groups).map(([key, arr]) => ({
+      key, label: key.replace(/^สจ\./, ''), srcVal: null,
+      avg: arr.reduce((a, b) => a + _dVal(b), 0) / arr.length,
+      min: Math.min(...arr.map(_dVal)), max: Math.max(...arr.map(_dVal)), n: arr.length,
+      bar: arr.reduce((a, b) => a + _dVal(b), 0) / arr.length,
+      lat: arr.reduce((a, b) => a + b.lat, 0) / arr.length,
+      lon: arr.reduce((a, b) => a + b.lon, 0) / arr.length
+    }));
+  }
+  gRows.sort((a, b) => _dIsEc() ? b.bar - a.bar : a.bar - b.bar);
   return { n, pass, avg, med, watch, gRows };
 }
 
@@ -14467,13 +14515,17 @@ function buildDashboard() {
 
   // ── zone cards ──
   document.getElementById('dash-zones').innerHTML = st.gRows.map(g => {
-    const c = _dCol(g.avg);
-    const frac = Math.min(isEc ? g.avg / 500 : g.avg / 1.5, 1);
+    const v = g.bar;
+    const c = _dCol(v);
+    const frac = Math.min(isEc ? v / 500 : v / 1.5, 1);
+    const sub = DASH_GROUP === 'zone'
+      ? (g.n ? `รับน้ำ ${g.n} สถานี · เฉลี่ย ${_dFmt(g.avg)}` : 'ไม่มีสถานี monitor ในโซน')
+      : `${g.n} สถานี · ${isEc ? 'สูงสุด ' + Math.round(g.max) : 'ต่ำสุด ' + g.min.toFixed(2)}`;
     return `<div class="dz-card${String(g.key) === String(_dashSelKey) ? ' sel' : ''}" onclick="dashSelectZone('${String(g.key).replace(/'/g, "\\'")}')">` +
       `<svg width="34" height="34" viewBox="0 0 34 34"><circle cx="17" cy="17" r="13" fill="none" stroke="#eef2f7" stroke-width="5"/>` +
       `<circle cx="17" cy="17" r="13" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(frac * 81.7).toFixed(1)} 81.7" transform="rotate(-90 17 17)"/></svg>` +
-      `<div class="dz-info"><div class="dz-name">${g.label}</div><div class="dz-sub">${g.n} สถานี · ${isEc ? 'สูงสุด ' + Math.round(g.max) : 'ต่ำสุด ' + g.min.toFixed(2)}</div></div>` +
-      `<span class="dz-val" style="color:${c}">${_dFmt(g.avg)}</span></div>`;
+      `<div class="dz-info"><div class="dz-name">${g.label}</div><div class="dz-sub">${sub}</div></div>` +
+      `<span class="dz-val" style="color:${c}">${_dFmt(v)}</span></div>`;
   }).join('');
 
   // ── bar chart ──
@@ -14483,8 +14535,8 @@ function buildDashboard() {
     'ปรับปรุงล่าสุด: ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
   try {
     const labels = st.gRows.map(g => g.label);
-    const data = st.gRows.map(g => +(isEc ? Math.round(g.avg) : g.avg.toFixed(2)));
-    const colors = st.gRows.map(g => _dCol(g.avg));
+    const data = st.gRows.map(g => +(isEc ? Math.round(g.bar) : g.bar.toFixed(2)));
+    const colors = st.gRows.map(g => _dCol(g.bar));
     if (_dashChart) {
       _dashChart.data.labels = labels; _dashChart.data.datasets[0].data = data;
       _dashChart.data.datasets[0].backgroundColor = colors; _dashChart.update('none');
@@ -14508,23 +14560,34 @@ function dashSelectZone(key) {
   _dashSelKey = key;
   if (_dashHilite) { try { map.removeLayer(_dashHilite); } catch (e) {} _dashHilite = null; }
   let bounds = null;
+  window._dashClipCoords = null;
   if (DASH_GROUP === 'zone' && window.CUSTOM_ZONES && CUSTOM_ZONES[key] && CUSTOM_ZONES[key].coords && CUSTOM_ZONES[key].coords.length > 2) {
-    _dashHilite = L.polygon(CUSTOM_ZONES[key].coords,
-      { color: '#2563a8', weight: 3.5, fillColor: '#2563a8', fillOpacity: 0.07, dashArray: '9 6' }).addTo(map);
+    const coords = CUSTOM_ZONES[key].coords;
+    _dashHilite = L.polygon(coords,
+      { color: '#1d4ed8', weight: 4, fillOpacity: 0, opacity: 1 }).addTo(map);   // เส้นทึบ ไม่ทับสี contour
     bounds = _dashHilite.getBounds();
+    window._dashClipCoords = coords;                       // contour เฉพาะในโซน
   } else {
     const members = _dashMembers(key);
-    if (members.length) {
-      bounds = L.latLngBounds(members.map(m => [m.lat, m.lon])).pad(0.35);
-      _dashHilite = L.rectangle(bounds, { color: '#2563a8', weight: 3, fillOpacity: 0.05, dashArray: '9 6' }).addTo(map);
+    const src = SENSORS.find(x => String(x.id) === String(key));
+    const pts = members.map(m => [m.lat, m.lon]);
+    if (src) pts.push([src.lat, src.lon]);
+    if (pts.length) {
+      bounds = L.latLngBounds(pts).pad(0.35);
+      _dashHilite = L.rectangle(bounds, { color: '#1d4ed8', weight: 4, fillOpacity: 0, opacity: 1 }).addTo(map);
+      const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+      window._dashClipCoords = [[sw.lat, sw.lng], [sw.lat, ne.lng], [ne.lat, ne.lng], [ne.lat, sw.lng]];
     }
   }
+  try { redrawContour(0); } catch (e) {}
   if (bounds) { try { map.fitBounds(bounds, { padding: [28, 28] }); } catch (e) {} }
   _dashRenderDetail(key, row);
   buildDashboard(); // refresh .sel highlight บน card
 }
 function _dashClearSelect() {
   _dashSelKey = null;
+  window._dashClipCoords = null;
+  try { redrawContour(0); } catch (e) {}
   if (_dashHilite) { try { map.removeLayer(_dashHilite); } catch (e) {} _dashHilite = null; }
   const d = document.getElementById('dash-detail');
   if (d) d.classList.remove('show');
@@ -14549,7 +14612,7 @@ function _dashRenderDetail(key, row) {
     `<button class="dd-close" onclick="_dashClearSelect()">✕</button>` +
     `<h4>📍 ${row.label}</h4>` + srcHtml +
     `<div class="dd-note">▧ กรอบเส้นประสีน้ำเงินบนแผนที่ = ${DASH_GROUP === 'zone' ? 'พื้นที่อิทธิพลสูบจ่าย' : 'ขอบเขตสถานีในสาขา'}</div>` +
-    `<div class="dash-meta" style="margin-bottom:4px;">สถานีรับน้ำ ${members.length} แห่ง · เฉลี่ย ${_dFmt(row.avg)} ${_dUnit()}</div>` +
+    `<div class="dash-meta" style="margin-bottom:4px;">${members.length ? 'สถานีรับน้ำ ' + members.length + ' แห่ง · เฉลี่ย ' + _dFmt(row.avg) + ' ' + _dUnit() : 'ไม่มีสถานี monitor ในพื้นที่นี้ — แสดงค่าจากสถานีต้นทาง'}</div>` +
     members.map(m =>
       `<div class="dw-item" onclick="dashGoto(${m.lat},${m.lon})">` +
       `<span class="dw-name">${m.name || m.id}</span>` +
